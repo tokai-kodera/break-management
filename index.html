@@ -9,102 +9,76 @@
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: sans-serif; }
         body { background: #f0f2f5; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 20px; }
-        .container { width: 100%; max-width: 500px; background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
-        h1 { font-size: 1.5rem; margin-bottom: 15px; color: #333; }
+        .container { width: 100%; max-width: 500px; background: white; border-radius: 12px; padding: 30px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
+        h1 { font-size: 1.6rem; margin-bottom: 8px; color: #333; }
+        p { font-size: 0.9rem; color: #666; margin-bottom: 25px; line-height: 1.4; }
         
-        #interactive { position: relative; width: 100%; height: 280px; background: #000; border-radius: 8px; overflow: hidden; margin-bottom: 15px; }
-        #interactive video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
+        /* スマホの純正カメラを呼び出すための巨大で押しやすい安全なボタン */
+        .camera-label { display: block; background: #28a745; color: white; padding: 20px 10px; font-size: 1.3rem; font-weight: bold; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 6px rgba(40,167,69,0.3); transition: background 0.2s; margin-bottom: 15px; }
+        .camera-label:active { background: #218838; }
         
-        .laser-line { position: absolute; top: 50%; left: 10%; width: 80%; height: 2px; background: red; box-shadow: 0 0 8px red; z-index: 10; transform: translateY(-50%); animation: blink 1s infinite; }
-        @keyframes blink { 50% { opacity: 0.4; } }
-
-        .btn { display: block; width: 100%; padding: 12px; font-size: 1rem; font-weight: bold; color: white; background: #007bff; border: none; border-radius: 6px; cursor: pointer; margin-top: 10px; }
-        #result-box { margin-top: 15px; padding: 12px; border-radius: 6px; font-weight: bold; display: none; text-align: left; word-break: break-all; }
-        .success { background: #d4edda; color: #155724; }
-        .error { background: #f8d7da; color: #721c24; font-size: 0.9rem; }
-        .loading { background: #fff3cd; color: #856404; }
+        /* 実際のファイルinputは見えないように隠す */
+        #file-input { display: none; }
+        
+        #result-box { margin-top: 20px; padding: 15px; border-radius: 6px; font-weight: bold; font-size: 1.1rem; display: none; text-align: center; line-break: anywhere; }
+        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .loading { background: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>バーコードかざすだけ打刻</h1>
+    <h1>休憩打刻システム</h1>
+    <p>下のボタンを押して、従業員バーコードを撮影してください。<br>（写真は端末に保存されません）</p>
     
-    <div id="interactive" class="viewport">
-        <div class="laser-line"></div>
-    </div>
+    <!-- タップすると確実にスマホの標準背面カメラが起動する仕組み -->
+    <label for="file-input" class="camera-label">📷 カメラを起動してスキャン</label>
+    <input type="file" id="file-input" accept="image/*" capture="environment" onchange="decodeBarcode(this)">
 
-    <button id="retry-btn" class="btn" style="display:none;" onclick="startScanner('fallback')">予備モードでカメラ再起動</button>
     <div id="result-box"></div>
 </div>
 
 <script>
     // ⚠️ここに新しくデプロイした「GASのWebアプリURL」を貼り付けてください
     const GAS_API_URL = "https://script.google.com/macros/s/AKfycbzLB0lat0ynkK-oTwuaZvvlGOXmMl_-XGwZhEP-0QeYs-m3T-l8tbFov9y0Fhhhe14qlg/exec"; 
-    
-    let isProcessing = false;
 
-    // カメラ起動処理
-    function startScanner(mode = 'standard') {
-        document.getElementById('retry-btn').style.display = 'none';
+    // 撮影された画像（メモリ内）からバーコードを静止画解析する関数
+    function decodeBarcode(input) {
+        if (!input.files || !input.files[0]) return;
+        
+        showLoading("⚡ 画像を解析中...");
         hideResult();
 
-        // 起動モードに応じたカメラ設定の分岐
-        let videoConstraints = {};
-        if (mode === 'standard') {
-            // 第1候補: 標準的な背面カメラ指定
-            videoConstraints = { facingMode: "environment" };
-        } else if (mode === 'force-back') {
-            // 第2候補: 強制的な背面指定
-            videoConstraints = { facingMode: { exact: "environment" } };
-        } else {
-            // 最終手段: 制限をすべて解除（端末が動かせるカメラをどれでも起動）
-            videoConstraints = true;
-        }
-        
-        Quagga.init({
-            inputStream: {
-                name: "Live",
-                type: "LiveStream",
-                target: document.querySelector('#interactive'),
-                constraints: videoConstraints
-            },
-            decoder: {
-                readers: ["code_128_reader", "ean_reader", "code_39_reader"] 
-            },
-            locate: true
-        }, function (err) {
-            if (err) {
-                console.error(err);
-                // エラー発生時は段階的にカメラ条件を緩めて再起動を試みる
-                if (mode === 'standard') {
-                    startScanner('force-back');
-                } else if (mode === 'force-back') {
-                    startScanner('fallback');
-                } else {
-                    // すべての方法で失敗した場合、エラー内容を画面上にテキスト表示する
-                    showResult("【カメラ起動エラー】<br>原因: " + err.name + " (" + err.message + ")<br><br>■対処法:<br>1. スマホの「設定」＞「アプリ」＞「Chrome」でカメラ権限が許可されているか確認してください。<br>2. ページURLが「https://」で始まっているか確認してください。", true);
-                }
-                return;
-            }
-            Quagga.start();
-        });
-    }
+        const file = input.files[0];
+        const reader = new FileReader();
 
-    // バーコード検知イベント
-    Quagga.onDetected(function (data) {
-        if (isProcessing) return;
-        const code = data.codeResult.code;
-        if (code) {
-            isProcessing = true;
-            Quagga.stop(); 
-            sendPunchData(code);
-        }
-    });
+        reader.onload = function (e) {
+            // Quaggaの静止画解析（srcデータ）を利用してメモリ上でバーコードを高速抽出
+            Quagga.decodeSingle({
+                src: e.target.result,
+                lengthSize: 800, // 解析精度の最適化サイズ
+                decoder: {
+                    readers: ["code_128_reader", "ean_reader", "code_39_reader"] // 縦線バーコード対応
+                },
+                locate: true
+            }, function (result) {
+                if (result && result.codeResult && result.codeResult.code) {
+                    const code = result.codeResult.code;
+                    // バーコードが見つかったら即座にGASへPOST送信
+                    sendPunchData(code);
+                } else {
+                    showResult("バーコードを認識できませんでした。もう少し近づけるか、明るい場所でもう一度撮影してください。", true);
+                }
+                input.value = ''; // 選択されたファイルをリセット
+            });
+        };
+        reader.readAsDataURL(file);
+    }
 
     // GAS APIへ送信
     async function sendPunchData(employeeCode) {
-        showLoading(`送信中... [コード: ${employeeCode}]`);
+        showLoading(`打刻データを送信中... [コード: ${employeeCode}]`);
         try {
             await fetch(GAS_API_URL, {
                 method: "POST",
@@ -112,14 +86,9 @@
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ employeeCode: employeeCode })
             });
-            showResult(`打刻データを送信しました。<br>社員コード: ${employeeCode}`, false);
+            showResult(`打刻データを送信しました！<br>社員コード: ${employeeCode}`, false);
         } catch (error) {
-            showResult("通信エラーが発生しました。", true);
-        } finally {
-            setTimeout(() => {
-                isProcessing = false;
-                startScanner('standard');
-            }, 3000);
+            showResult("通信エラーが発生しました。インターネット接続を確認してください。", true);
         }
     }
 
@@ -131,12 +100,11 @@
     function showResult(msg, isError) {
         const box = document.getElementById('result-box');
         box.className = isError ? "error" : "success"; box.innerHTML = msg; box.style.display = "block";
-        if(isError) document.getElementById('retry-btn').style.display = 'block';
     }
 
-    function hideResult() { document.getElementById('result-box').style.display = "none"; }
-
-    window.onload = function() { startScanner('standard'); };
+    function hideResult() { 
+        document.getElementById('result-box').style.display = "none"; 
+    }
 </script>
 </body>
 </html>
