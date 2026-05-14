@@ -4,27 +4,24 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>休憩打刻システム</title>
-    <!-- QuaggaJS (1次元バーコードスキャナ) 最新安定版CDN -->
-    <script src="cloudflare.com" integrity="sha512-bCsBoYwQMeHexqjcR2LNfSRb9wUe81wj7gHbf0mwhefpQn56rleS8Xpfd7O6zO6X8a+94F455cbe+A9S43pM3Q==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <!-- QuaggaJS 最新安定版CDN -->
+    <script src="cloudflare.com"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: sans-serif; }
         body { background: #f0f2f5; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 20px; }
         .container { width: 100%; max-width: 500px; background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
         h1 { font-size: 1.5rem; margin-bottom: 15px; color: #333; }
         
-        /* スキャナ表示領域 */
         #interactive { position: relative; width: 100%; height: 280px; background: #000; border-radius: 8px; overflow: hidden; margin-bottom: 15px; }
         #interactive video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
         
-        /* 1次元バーコード用エイム線 */
         .laser-line { position: absolute; top: 50%; left: 10%; width: 80%; height: 2px; background: red; box-shadow: 0 0 8px red; z-index: 10; transform: translateY(-50%); animation: blink 1s infinite; }
         @keyframes blink { 50% { opacity: 0.4; } }
 
         .btn { display: block; width: 100%; padding: 12px; font-size: 1rem; font-weight: bold; color: white; background: #007bff; border: none; border-radius: 6px; cursor: pointer; margin-top: 10px; }
-        .btn:disabled { background: #ccc; }
-        #result-box { margin-top: 15px; padding: 12px; border-radius: 6px; font-weight: bold; display: none; }
+        #result-box { margin-top: 15px; padding: 12px; border-radius: 6px; font-weight: bold; display: none; text-align: left; word-break: break-all; }
         .success { background: #d4edda; color: #155724; }
-        .error { background: #f8d7da; color: #721c24; }
+        .error { background: #f8d7da; color: #721c24; font-size: 0.9rem; }
         .loading { background: #fff3cd; color: #856404; }
     </style>
 </head>
@@ -33,12 +30,11 @@
 <div class="container">
     <h1>バーコードかざすだけ打刻</h1>
     
-    <!-- 映像プレビュー（写真は保存されない） -->
     <div id="interactive" class="viewport">
         <div class="laser-line"></div>
     </div>
 
-    <button id="retry-btn" class="btn" style="display:none;" onclick="startScanner('environment')">スキャン再開</button>
+    <button id="retry-btn" class="btn" style="display:none;" onclick="startScanner('fallback')">予備モードでカメラ再起動</button>
     <div id="result-box"></div>
 </div>
 
@@ -48,43 +44,46 @@
     
     let isProcessing = false;
 
-    // Quaggaスキャナー起動処理
-    function startScanner(cameraMode = 'environment') {
+    // カメラ起動処理
+    function startScanner(mode = 'standard') {
         document.getElementById('retry-btn').style.display = 'none';
         hideResult();
-        
-        // Android特有のエラーを回避するため、標準・強制の順で設定を構築
-        const constraints = cameraMode === 'exact-environment' 
-            ? { facingMode: { exact: "environment" } }
-            : cameraMode === 'environment' 
-                ? { facingMode: "environment" }
-                : { width: { min: 640 }, height: { min: 480 } }; // 最終手段：汎用カメラ起動
 
+        // 起動モードに応じたカメラ設定の分岐
+        let videoConstraints = {};
+        if (mode === 'standard') {
+            // 第1候補: 標準的な背面カメラ指定
+            videoConstraints = { facingMode: "environment" };
+        } else if (mode === 'force-back') {
+            // 第2候補: 強制的な背面指定
+            videoConstraints = { facingMode: { exact: "environment" } };
+        } else {
+            // 最終手段: 制限をすべて解除（端末が動かせるカメラをどれでも起動）
+            videoConstraints = true;
+        }
+        
         Quagga.init({
             inputStream: {
                 name: "Live",
                 type: "LiveStream",
                 target: document.querySelector('#interactive'),
-                constraints: constraints
+                constraints: videoConstraints
             },
             decoder: {
-                // 現場で使用する1次元バーコード規格
                 readers: ["code_128_reader", "ean_reader", "code_39_reader"] 
             },
-            locate: true // バーコード位置の自動検出
+            locate: true
         }, function (err) {
             if (err) {
-                console.error("Camera Init Error: ", err);
-                
-                // 【自動フォールバック】背面指定でエラーが出たら、より緩い条件で再試行
-                if (cameraMode === 'environment') {
-                    console.log("背面カメラの通常起動に失敗。強制背面モードを試します。");
-                    startScanner('exact-environment');
-                } else if (cameraMode === 'exact-environment') {
-                    console.log("強制背面モードに失敗。汎用カメラモードを試します。");
-                    startScanner('any');
+                console.error(err);
+                // エラー発生時は段階的にカメラ条件を緩めて再起動を試みる
+                if (mode === 'standard') {
+                    startScanner('force-back');
+                } else if (mode === 'force-back') {
+                    startScanner('fallback');
                 } else {
-                    showResult("カメラの起動に失敗しました。Androidの「設定」＞「アプリ」＞「Chrome」からカメラ権限が「許可」されているか確認してください。", true);
+                    // すべての方法で失敗した場合、エラー内容を画面上にテキスト表示する
+                    showResult("【カメラ起動エラー】<br>原因: " + err.name + " (" + err.message + ")<br><br>■対処法:<br>1. スマホの「設定」＞「アプリ」＞「Chrome」でカメラ権限が許可されているか確認してください。<br>2. ページURLが「https://」で始まっているか確認してください。", true);
                 }
                 return;
             }
@@ -92,68 +91,52 @@
         });
     }
 
-    // バーコード検知時のイベント
+    // バーコード検知イベント
     Quagga.onDetected(function (data) {
         if (isProcessing) return;
-        
         const code = data.codeResult.code;
         if (code) {
             isProcessing = true;
-            Quagga.stop(); // 連投防止のため一旦ストップ
+            Quagga.stop(); 
             sendPunchData(code);
         }
     });
 
-    // GAS APIへ打刻データを送信
+    // GAS APIへ送信
     async function sendPunchData(employeeCode) {
-        showLoading(`読み込み中... [コード: ${employeeCode}]`);
-        
+        showLoading(`送信中... [コード: ${employeeCode}]`);
         try {
-            // fetchを用いたCORS通信（GASの仕様上、リダイレクトを自動追跡させ、modeはno-corsを指定）
             await fetch(GAS_API_URL, {
                 method: "POST",
                 mode: "no-cors",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ employeeCode: employeeCode })
             });
-
-            // no-cors通信ではレスポンスを直接読めないため、送信成功をもって確定とします
-            showResult(`打刻データを送信しました。[コード: ${employeeCode}]`, false);
-            
+            showResult(`打刻データを送信しました。<br>社員コード: ${employeeCode}`, false);
         } catch (error) {
             showResult("通信エラーが発生しました。", true);
         } finally {
-            // 3秒後に自動でスキャンを再開
             setTimeout(() => {
                 isProcessing = false;
-                startScanner('environment');
+                startScanner('standard');
             }, 3000);
         }
     }
 
     function showLoading(msg) {
         const box = document.getElementById('result-box');
-        box.className = "loading";
-        box.innerText = msg;
-        box.style.display = "block";
+        box.className = "loading"; box.innerHTML = msg; box.style.display = "block";
     }
 
     function showResult(msg, isError) {
         const box = document.getElementById('result-box');
-        box.className = isError ? "error" : "success";
-        box.innerText = msg;
-        box.style.display = "block";
+        box.className = isError ? "error" : "success"; box.innerHTML = msg; box.style.display = "block";
         if(isError) document.getElementById('retry-btn').style.display = 'block';
     }
 
-    function hideResult() {
-        document.getElementById('result-box').style.display = "none";
-    }
+    function hideResult() { document.getElementById('result-box').style.display = "none"; }
 
-    // 画面ロード時に自動でカメラ起動
-    window.onload = function() {
-        startScanner('environment');
-    };
+    window.onload = function() { startScanner('standard'); };
 </script>
 </body>
 </html>
