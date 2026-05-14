@@ -4,107 +4,62 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>休憩打刻システム</title>
-    <!-- QuaggaJS 最新安定版CDN -->
-    <script src="cloudflare.com"></script>
+    <!-- QuaggaJS CDN -->
+    <script src="https://jsdelivr.net"></script>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: sans-serif; }
-        body { background: #f0f2f5; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 20px; }
-        .container { width: 100%; max-width: 500px; background: white; border-radius: 12px; padding: 30px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
-        h1 { font-size: 1.6rem; margin-bottom: 8px; color: #333; }
-        p { font-size: 0.9rem; color: #666; margin-bottom: 25px; line-height: 1.4; }
-        
-        /* スマホの純正カメラを呼び出すための巨大で押しやすい安全なボタン */
-        .camera-label { display: block; background: #28a745; color: white; padding: 20px 10px; font-size: 1.3rem; font-weight: bold; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 6px rgba(40,167,69,0.3); transition: background 0.2s; margin-bottom: 15px; }
-        .camera-label:active { background: #218838; }
-        
-        /* 実際のファイルinputは見えないように隠す */
+        /* CSSスタイルは適宜調整してください */
+        body { font-family: sans-serif; text-align: center; }
+        .camera-label { background: #28a745; color: white; padding: 10px; border-radius: 5px; cursor: pointer; }
         #file-input { display: none; }
-        
-        #result-box { margin-top: 20px; padding: 15px; border-radius: 6px; font-weight: bold; font-size: 1.1rem; display: none; text-align: center; line-break: anywhere; }
-        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-        .loading { background: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
+        #result-box { margin-top: 20px; font-weight: bold; }
     </style>
 </head>
 <body>
-
-<div class="container">
     <h1>休憩打刻システム</h1>
-    <p>下のボタンを押して、従業員バーコードを撮影してください。<br>（写真は端末に保存されません）</p>
-    
-    <!-- タップすると確実にスマホの標準背面カメラが起動する仕組み -->
-    <label for="file-input" class="camera-label">📷 カメラを起動してスキャン</label>
-    <input type="file" id="file-input" accept="image/*" capture="environment" onchange="decodeBarcode(this)">
-
+    <label for="file-input" class="camera-label">📷 カメラでスキャン</label>
+    <input type="file" id="file-input" accept="image/*" capture="environment" onchange="processAndDecode(this)">
     <div id="result-box"></div>
-</div>
 
 <script>
-    // ⚠️ここに新しくデプロイした「GASのWebアプリURL」を貼り付けてください
-    const GAS_API_URL = "https://script.google.com/macros/s/AKfycbzLB0lat0ynkK-oTwuaZvvlGOXmMl_-XGwZhEP-0QeYs-m3T-l8tbFov9y0Fhhhe14qlg/exec"; 
+    const GAS_API_URL = "YOUR_GAS_URL_HERE"; 
 
-    // 撮影された画像（メモリ内）からバーコードを静止画解析する関数
-    function decodeBarcode(input) {
+    // 画像をリサイズしてQuaggaに渡す処理
+    function processAndDecode(input) {
         if (!input.files || !input.files[0]) return;
-        
-        showLoading("⚡ 画像を解析中...");
-        hideResult();
-
         const file = input.files[0];
         const reader = new FileReader();
 
         reader.onload = function (e) {
-            // Quaggaの静止画解析（srcデータ）を利用してメモリ上でバーコードを高速抽出
-            Quagga.decodeSingle({
-                src: e.target.result,
-                lengthSize: 800, // 解析精度の最適化サイズ
-                decoder: {
-                    readers: ["code_128_reader", "ean_reader", "code_39_reader"] // 縦線バーコード対応
-                },
-                locate: true
-            }, function (result) {
-                if (result && result.codeResult && result.codeResult.code) {
-                    const code = result.codeResult.code;
-                    // バーコードが見つかったら即座にGASへPOST送信
-                    sendPunchData(code);
-                } else {
-                    showResult("バーコードを認識できませんでした。もう少し近づけるか、明るい場所でもう一度撮影してください。", true);
-                }
-                input.value = ''; // 選択されたファイルをリセット
-            });
+            const img = new Image();
+            img.onload = function () {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                // バーコード解析に適したサイズ(横幅800px)にリサイズ
+                const targetWidth = 800;
+                const scaleFactor = targetWidth / img.width;
+                canvas.width = targetWidth;
+                canvas.height = img.height * scaleFactor;
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                
+                // 縮小データを使用
+                const resizedDataUrl = canvas.toDataURL('image/jpeg', 0.8);
+
+                Quagga.decodeSingle({
+                    src: resizedDataUrl,
+                    decoder: { readers: ["code_128_reader", "ean_reader"] } // 必要に応じてリーダー追加
+                }, function (result) {
+                    if (result && result.codeResult) {
+                        sendPunchData(result.codeResult.code);
+                    } else {
+                        document.getElementById('result-box').innerText = "認識できませんでした";
+                    }
+                });
+            };
+            img.src = e.target.result;
         };
         reader.readAsDataURL(file);
     }
-
-    // GAS APIへ送信
-    async function sendPunchData(employeeCode) {
-        showLoading(`打刻データを送信中... [コード: ${employeeCode}]`);
-        try {
-            await fetch(GAS_API_URL, {
-                method: "POST",
-                mode: "no-cors",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ employeeCode: employeeCode })
-            });
-            showResult(`打刻データを送信しました！<br>社員コード: ${employeeCode}`, false);
-        } catch (error) {
-            showResult("通信エラーが発生しました。インターネット接続を確認してください。", true);
-        }
-    }
-
-    function showLoading(msg) {
-        const box = document.getElementById('result-box');
-        box.className = "loading"; box.innerHTML = msg; box.style.display = "block";
-    }
-
-    function showResult(msg, isError) {
-        const box = document.getElementById('result-box');
-        box.className = isError ? "error" : "success"; box.innerHTML = msg; box.style.display = "block";
-    }
-
-    function hideResult() { 
-        document.getElementById('result-box').style.display = "none"; 
-    }
+    // sendPunchData関数は適宜実装
 </script>
 </body>
 </html>
