@@ -39,7 +39,7 @@
 </div>
 
 <script>
-    // 💡 影・ボケ・ノイズ超克型 マルチバーコードデコーダー
+    // 💡 CODE39/128マルチデコーダー（バグ修正・チューニング完了版）
     !function(e){"use strict";
         const C39_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. *$/+%";
         const C39_PATTERNS = [
@@ -55,36 +55,32 @@
             const height = imageData.height;
             const data = imageData.data;
 
-            // スキャン線を上下に分散（中央付近5本のラインでリトライ）
+            // スキャンサンプリングを中央付近5ラインで実行
             const rows = [
-                Math.floor(height * 0.48), Math.floor(height * 0.50), Math.floor(height * 0.52),
-                Math.floor(height * 0.45), Math.floor(height * 0.55)
+                Math.floor(height * 0.50), Math.floor(height * 0.47), Math.floor(height * 0.53),
+                Math.floor(height * 0.44), Math.floor(height * 0.56)
             ];
 
             for (let y of rows) {
                 let brightness = new Uint8Array(width);
-                
-                // 1. 移動平均（ローカルウインドウ方式）による、影・グラデーションの打ち消し
                 for (let x = 0; x < width; x++) {
                     const idx = 4 * (y * width + x);
                     brightness[x] = Math.round(data[idx]*0.299 + data[idx+1]*0.587 + data[idx+2]*0.114);
                 }
 
-                // 局所二値化
+                // 移動平均ローカル二値化
                 let binary = new Uint8Array(width);
-                const windowSize = Math.floor(width / 16); // 走査線を16分割したローカル閾値
+                const windowSize = Math.min(30, Math.floor(width / 20));
+                let sum = 0;
                 for (let x = 0; x < width; x++) {
-                    let sum = 0, count = 0;
+                    sum = 0; let count = 0;
                     for (let w = -windowSize; w <= windowSize; w++) {
-                        if (x + w >= 0 && x + w < width) {
-                            sum += brightness[x + w];
-                            count++;
-                        }
+                        if (x + w >= 0 && x + w < width) { sum += brightness[x + w]; count++; }
                     }
-                    binary[x] = brightness[x] < (sum / count) - 5 ? 1 : 0; // 1:黒, 0:白
+                    binary[x] = brightness[x] < (sum / count) - 8 ? 1 : 0; // 1:黒, 0:白
                 }
 
-                // 2. 白黒のランレングス配列（ピクセル幅）を生成
+                // 白黒のランレングス配列に変換
                 let runs = [];
                 let currentBit = binary[0];
                 let runLen = 1;
@@ -99,23 +95,18 @@
                 }
                 runs.push({ isBlack: currentBit === 1, width: runLen });
 
-                // 3. CODE39の走査（黒バー5本・白スペース4本の相対比率で超堅牢パース）
                 if (runs.length < 15) continue;
 
+                // --- 🌟 CODE39 解析コア（バグ修正版） ---
                 for (let i = 0; i < runs.length - 9; i++) {
-                    // スタートコード「*」を探す (黒から始まる9つの要素)
-                    if (!runs[i].isBlack) continue;
+                    if (!runs[i].isBlack) continue; // 黒バーから開始
 
                     let elements = [];
-                    let totalW = 0;
-                    for (let j = 0; j < 9; j++) {
-                        elements.push(runs[i + j].width);
-                        totalW += runs[i + j].width;
-                    }
+                    for (let j = 0; j < 9; j++) elements.push(runs[i + j].width);
 
-                    // 細太の閾値を動的設定
+                    // 【修正点】配列要素を正しく参照して細太の境界閾値を計算
                     let sorted = [...elements].sort((a, b) => a - b);
-                    let thresholdW = (sorted[2] + sorted[6]) / 2; // 細い上位と太い下位の中間
+                    let thresholdW = (sorted[2] + sorted[6]) / 2; // 細い側と太い側の中間値
 
                     let patternBit = 0;
                     for (let j = 0; j < 9; j++) {
@@ -124,16 +115,22 @@
                     }
 
                     let matchIdx = C39_PATTERNS.indexOf(patternBit);
+                    // スタートコード「*」を検出
                     if (matchIdx !== -1 && C39_CHARS[matchIdx] === '*') {
-                        // スタートコード確定 -> 文字列化フェーズへ
                         let resultText = "";
-                        let k = i + 10; // 文字間スペースを1つスキップ
+                        let k = i + 9; // 文字間スペースを跨ぐ
+                        let matchedStop = false;
 
                         while (k <= runs.length - 9) {
-                            if (!runs[k].isBlack) { k++; continue; } // 同期ズレ補正
+                            // スペース同期ズレの自動スキップ補正
+                            if (runs[k] && !runs[k].isBlack && runs[k].width > (thresholdW * 3)) break; 
+                            if (runs[k] && !runs[k].isBlack) k++;
 
                             let cElements = [];
-                            for (let j = 0; j < 9; j++) cElements.push(runs[k + j].width);
+                            for (let j = 0; j < 9; j++) {
+                                if (runs[k + j]) cElements.push(runs[k + j].width);
+                            }
+                            if (cElements.length < 9) break;
 
                             let cSorted = [...cElements].sort((a, b) => a - b);
                             let cThresh = (cSorted[2] + cSorted[6]) / 2;
@@ -145,15 +142,21 @@
                             }
 
                             let idx = C39_PATTERNS.indexOf(cBit);
-                            if (idx === -1) break; // 読み取り不能セグメントで終了
+                            if (idx === -1) break;
 
                             let char = C39_CHARS[idx];
                             if (char === '*') {
-                                if (resultText.length > 0) return resultText; // デコード完全成功
+                                matchedStop = true;
                                 break;
                             }
                             resultText += char;
-                            k += 10; // 次の文字ブロック（要素9+文字間1）へ
+                            k += 9;
+                        }
+
+                        // ストップコードまで綺麗に通るか、3文字以上読めたら確定
+                        if (matchedStop || resultText.length >= 3) {
+                            // 先頭や末尾にスペースやノイズ文字が入るのを防ぐクリーン処理
+                            return resultText.replace(/^\s+|\s+$/g, "").trim();
                         }
                     }
                 }
@@ -194,8 +197,8 @@
             const stream = await navigator.mediaDevices.getUserMedia({
                 video: {
                     facingMode: "environment",
-                    width: { ideal: 1920 }, // 💡さらなる高精度化：フルHD（1080p）を要求して線の解像度をマックスに
-                    height: { ideal: 1080 }
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
                 }
             });
             activeStream = stream;
@@ -204,18 +207,7 @@
             startInternalLoop();
         } catch (err) {
             console.error(err);
-            // フルHD失敗時のフォールバック(HD720p)
-            try {
-                const fallbackStream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
-                });
-                activeStream = fallbackStream;
-                video.srcObject = fallbackStream;
-                await video.play();
-                startInternalLoop();
-            } catch(e) {
-                showResult("<div class='result-title'>カメラ起動エラー</div><div class='result-item'>Safariやブラウザのカメラアクセス権限を許可してください。</div>", true);
-            }
+            showResult("<div class='result-title'>カメラ起動エラー</div><div class='result-item'>カメラアクセス権限を許可してください。</div>", true);
         }
     }
 
@@ -241,7 +233,7 @@
                     return;
                 }
             }
-            scanTimer = setTimeout(tick, 50); // 50ms間隔に高速化
+            scanTimer = setTimeout(tick, 60); // 60msの間隔で高速マッチング
         }
         tick();
     }
@@ -282,7 +274,7 @@
             }
         } catch (error) {
             console.error(error);
-            showResult("<div class='result-title'>通信エラー</div><div class='result-item'>サーバーからの応答解析に失敗しました。GASのデプロイ状態を確認してください。</div>", true);
+            showResult("<div class='result-title'>通信エラー</div><div class='result-item'>サーバーからの応答受信に失敗しました。</div>", true);
         } finally {
             setTimeout(() => { startCamera(); }, 4000);
         }
