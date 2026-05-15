@@ -43,158 +43,147 @@
 
     <div class="debug-panel">
         <div class="debug-title">
-            <span>🔍 特化型認識ステータス</span>
-            <span id="debug-status" style="color: #ffc107;">カメラ初期化中...</span>
+            <span>🔍 リアルタイム解析ステータス</span>
+            <span id="debug-status" style="color: #ffc107;">カメラ起動中...</span>
         </div>
-        <div id="debug-stable-info">バーコード検知の安定度: 🔲🔲🔲</div>
+        <div id="debug-stable-info">解析システム: 待機中</div>
         <canvas id="debug-canvas"></canvas>
     </div>
 </div>
 
 <script>
-    // 💡 規格に依存しない、実機画像特化型ファジーデコーダー
+    // 💡 リアルタイム実文字パース・遠距離マルチ規格デコーダー
     !function(e){"use strict";
         const C39_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. *$/+%";
         const C39_PATTERNS = [
-            0x034, 0x120, 0x030, 0x110, 0x014, 0x104, 0x024, 0x005, 0x101, 0x021,
-            0x140, 0x050, 0x150, 0x044, 0x144, 0x054, 0x00c, 0x10c, 0x02c, 0x012,
-            0x112, 0x032, 0x122, 0x042, 0x142, 0x052, 0x003, 0x103, 0x023, 0x00b,
-            0x10b, 0x02b, 0x11a, 0x02a, 0x12a, 0x04a, 0x009, 0x109, 0x029, 0x006,
-            0x060, 0x068, 0x0a0
+            0x034, 0x120, 0x030, 0x110, 0x014, 0x104, 0x024, 0x005, 0x101, 0x021, // 0-9
+            0x140, 0x050, 0x150, 0x044, 0x144, 0x054, 0x00c, 0x10c, 0x02c, 0x012, // A-J
+            0x112, 0x032, 0x122, 0x042, 0x142, 0x052, 0x003, 0x103, 0x023, 0x00b, // K-T
+            0x10b, 0x02b, 0x11a, 0x02a, 0x12a, 0x04a, 0x009, 0x109, 0x029, 0x006, // U-Z, -, ., space, *
+            0x060, 0x068, 0x0a0 // $, /, +, %
         ];
-
-        // 連続安定度判定用のグローバル状態
-        let stableCount = 0;
-        let lastElementCount = 0;
 
         e.decode = function(imageData, drawDebugCanvas) {
             const width = imageData.width;
             const height = imageData.height;
             const data = imageData.data;
 
-            // 写真のレーザー赤線付近（中央固定）のラインをパース
-            const y = Math.floor(height * 0.50);
-            let brightness = new Uint8Array(width);
-            let min = 255, max = 0;
-            
-            for (let x = 0; x < width; x++) {
-                const idx = 4 * (y * width + x);
-                const b = Math.round(data[idx]*0.299 + data[idx+1]*0.587 + data[idx+2]*0.114);
-                brightness[x] = b;
-                if (b < min) min = b;
-                if (b > max) max = b;
-            }
+            // 遠距離でのブレをカバーするため、中央付近の3ラインを並行パース
+            const rows = [Math.floor(height * 0.50), Math.floor(height * 0.47), Math.floor(height * 0.53)];
 
-            // 1. コントラスト不十分なら即リターン
-            if (max - min < 45) {
-                stableCount = 0;
-                return { code: null, stable: 0, msg: "バーコードを赤線に合わせてください" };
-            }
-            const threshold = (min + max) / 2;
-
-            // 2. 二値化
-            let binary = new Uint8Array(width);
-            for (let x = 0; x < width; x++) {
-                binary[x] = brightness[x] < threshold ? 1 : 0; 
-            }
-            if (drawDebugCanvas) drawDebugCanvas(binary, width);
-
-            // 3. 線の太さ配列の生成
-            let runs = [];
-            let currentBit = binary[0];
-            let runLen = 1;
-            for (let x = 1; x < width; x++) {
-                if (binary[x] === currentBit) {
-                    runLen++;
-                } else {
-                    runs.push({ isBlack: currentBit === 1, width: runLen });
-                    currentBit = binary[x];
-                    runLen = 1;
-                }
-            }
-            runs.push({ isBlack: currentBit === 1, width: runLen });
-
-            // 4. バーコードらしき塊（ノイズ領域を除く）を抽出
-            let startIdx = -1;
-            let endIdx = -1;
-            for(let i=0; i<runs.length; i++) {
-                if(runs[i].width >= 10 && runs[i].isBlack) { startIdx = i; break; }
-            }
-            for(let i=runs.length-1; i>=0; i--) {
-                if(runs[i].width >= 10 && runs[i].isBlack) { endIdx = i; break; }
-            }
-
-            if(startIdx === -1 || endIdx === -1 || (endIdx - startIdx) < 20) {
-                stableCount = 0;
-                return { code: null, stable: 0, msg: "バーコードを検知中..." };
-            }
-
-            // 有効な線の総数
-            const currentCount = endIdx - startIdx + 1;
-
-            // 🌟 核心：一定時間（3フレーム）同じ数の縦線の塊がそこで静止しているか判定
-            if (Math.abs(currentCount - lastElementCount) <= 2) {
-                stableCount++;
-            } else {
-                stableCount = 0;
-            }
-            lastElementCount = currentCount;
-
-            // まだ制止時間が足りない場合は保留
-            if (stableCount < 3) {
-                return { code: null, stable: stableCount, msg: "バーコードをそのまま静止してください..." };
-            }
-
-            // 5. 🚀 【ファジー抽出】厳格なルールを無視して比率からコードを強制復元
-            let validRuns = runs.slice(startIdx, endIdx + 1);
-            let resultText = "";
-            let ptr = 0;
-
-            // CODE39の文字ブロック（要素9つ分）を切り出しながらパース
-            while (ptr <= validRuns.length - 9) {
-                let charElements = [];
-                for (let j = 0; j < 9; j++) charElements.push(validRuns[ptr + j].width);
-
-                // ローカル（文字単位）で太い・細いの中間を柔軟に決定（レンズ歪み対応）
-                let sorted = [...charElements].sort((a, b) => a - b);
-                let charThresh = (sorted[4] + sorted[5]) / 2; // 中央値で分断
-
-                let patternBit = 0;
-                for (let j = 0; j < 9; j++) {
-                    patternBit <<= 1;
-                    if (charElements[j] > charThresh) patternBit |= 1;
-                }
-
-                let matchIdx = C39_PATTERNS.indexOf(patternBit);
+            for (let y of rows) {
+                let brightness = new Uint8Array(width);
+                let min = 255, max = 0;
                 
-                // 曖昧判定補正：もし完全に合致しない場合、ビット誤差が最も少ない文字を逆引き
-                if (matchIdx === -1) {
-                    let bestIdx = -1;
-                    let minDiff = 99;
-                    for (let pIdx = 0; pIdx < C39_PATTERNS.length; pIdx++) {
-                        let diff = 0;
-                        let xor = patternBit ^ C39_PATTERNS[pIdx];
-                        while (xor > 0) { if (xor & 1) diff++; xor >>= 1; }
-                        if (diff < minDiff) { minDiff = diff; bestIdx = pIdx; }
+                for (let x = 0; x < width; x++) {
+                    const idx = 4 * (y * width + x);
+                    const b = Math.round(data[idx]*0.299 + data[idx+1]*0.587 + data[idx+2]*0.114);
+                    brightness[x] = b;
+                    if (b < min) min = b;
+                    if (b > max) max = b;
+                }
+
+                if (max - min < 35) continue; // コントラスト不足
+                const threshold = (min + max) / 2;
+
+                let binary = new Uint8Array(width);
+                for (let x = 0; x < width; x++) {
+                    binary[x] = brightness[x] < threshold ? 1 : 0; 
+                }
+                if (y === Math.floor(height * 0.50) && drawDebugCanvas) drawDebugCanvas(binary, width);
+
+                // 白黒エレメント幅配列の生成
+                let runs = [];
+                let currentBit = binary[0];
+                let runLen = 1;
+                for (let x = 1; x < width; x++) {
+                    if (binary[x] === currentBit) {
+                        runLen++;
+                    } else {
+                        runs.push({ isBlack: currentBit === 1, width: runLen });
+                        currentBit = binary[x];
+                        runLen = 1;
                     }
-                    if (minDiff <= 2) matchIdx = bestIdx; // 2ビット以内のブレなら同一視して救済
                 }
+                runs.push({ isBlack: currentBit === 1, width: runLen });
 
-                if (matchIdx !== -1) {
-                    let char = C39_CHARS[matchIdx];
-                    if (char !== '*') resultText += char; // スタートストップ以外を蓄積
+                if (runs.length < 15) continue;
+
+                // --- 🌟 CODE39の実文字抽出アルゴリズム（遠距離ファジー対応） ---
+                for (let i = 0; i < runs.length - 9; i++) {
+                    if (!runs[i].isBlack) continue;
+
+                    let elements = [];
+                    for (let j = 0; j < 9; j++) elements.push(runs[i + j].width);
+
+                    let sorted = [...elements].sort((a, b) => a - b);
+                    // 遠距離(1〜2px)でも極小の太さ差を鋭敏に分断する動きに最適化
+                    let thresholdW = (sorted[3] + sorted[5]) / 2; 
+
+                    let patternBit = 0;
+                    for (let j = 0; j < 9; j++) {
+                        patternBit <<= 1;
+                        if (elements[j] > thresholdW) patternBit |= 1;
+                    }
+
+                    let matchIdx = C39_PATTERNS.indexOf(patternBit);
+                    
+                    // スタートコード「*」を捉えたら、続く文字ブロックをリアルタイムにデコード
+                    if (matchIdx !== -1 && C39_CHARS[matchIdx] === '*') {
+                        let resultText = "";
+                        let k = i + 10; // 文字間スペースをスキップして最初の文字へ
+                        let hasStopCode = false;
+
+                        while (k <= runs.length - 9) {
+                            if (runs[k] && !runs[k].isBlack) k++; // 同期ズレ自動補正
+
+                            let cElements = [];
+                            for (let j = 0; j < 9; j++) {
+                                if (runs[k + j]) cElements.push(runs[k + j].width);
+                            }
+                            if (cElements.length < 9) break;
+
+                            let cSorted = [...cElements].sort((a, b) => a - b);
+                            let cThresh = (cSorted[3] + cSorted[5]) / 2;
+
+                            let cBit = 0;
+                            for (let j = 0; j < 9; j++) {
+                                cBit <<= 1;
+                                if (cElements[j] > cThresh) cBit |= 1;
+                            }
+
+                            let idx = C39_PATTERNS.indexOf(cBit);
+                            
+                            // 遠距離ボケ救済：完全一致しない場合、最もビットパターンが近い文字へマッピング
+                            if (idx === -1) {
+                                let bestIdx = -1, minDiff = 99;
+                                for (let pIdx = 0; pIdx < C39_PATTERNS.length; pIdx++) {
+                                    let diff = 0, xor = cBit ^ C39_PATTERNS[pIdx];
+                                    while (xor > 0) { if (xor & 1) diff++; xor >>= 1; }
+                                    if (diff < minDiff) { minDiff = diff; bestIdx = pIdx; }
+                                }
+                                if (minDiff <= 1) idx = bestIdx; // 1ビットのノイズブレなら許容
+                            }
+
+                            if (idx === -1) break;
+
+                            let char = C39_CHARS[idx];
+                            if (char === '*') {
+                                hasStopCode = true;
+                                break;
+                            }
+                            resultText += char;
+                            k += 10;
+                        }
+
+                        // 文字化が成功し、2文字以上の有意な英数字コードが復元できた場合のみ確定
+                        if (resultText.length >= 2) {
+                            return resultText.trim();
+                        }
+                    }
                 }
-                ptr += 10; // 次の文字ブロックへ（文字間スペース1つ跨ぐ）
             }
-
-            // 写真から逆算した小寺さんの文字パターン（長さ不足やノイズが混じった場合の最終救済フォールバック）
-            if (resultText.length < 3 || !/[0-9A-Z]/.test(resultText)) {
-                // 万が一文字化がブレても、綺麗な縦線配列がそこにあることは写真から確定しているため
-                // 現場運用に穴を開けないよう、小寺さんの固定マスターコードをフォールバック返却
-                return { code: "0K99999", stable: stableCount, msg: "ファジー抽出成功" };
-            }
-
-            return { code: resultText.trim(), stable: stableCount, msg: "デコード成功" };
+            return null;
         };
     }(this.BarcodeScanner = {});
 </script>
@@ -229,16 +218,27 @@
         videoContainer.appendChild(video);
 
         try {
+            // フルHD（1080p）を要求して、遠距離からでも線幅のピクセル数を極限まで稼ぐ構成にシフト
             const stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } }
+                video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } }
             });
             activeStream = stream;
             video.srcObject = stream;
             video.play().catch(e => console.log(e));
             startInternalLoop();
         } catch (err) {
-            console.error(err);
-            showResult("<div class='result-title'>カメラ起動エラー</div><div class='result-item'>カメラ権限をオンにしてください。</div>", true);
+            // フルHDが端末側で拒否された場合のフォールバック
+            try {
+                const fallbackStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
+                });
+                activeStream = fallbackStream;
+                video.srcObject = fallbackStream;
+                video.play();
+                startInternalLoop();
+            } catch(e) {
+                showResult("<div class='result-title'>カメラ起動エラー</div><div class='result-item'>カメラ権限をオンにしてください。</div>", true);
+            }
         }
     }
 
@@ -265,33 +265,29 @@
         function tick() {
             if (isProcessing) return;
             if (video && video.readyState === video.HAVE_ENOUGH_DATA) {
-                canvas.width = 640; canvas.height = 480;
+                // フルHD入力を高精細なままCanvasへ展開
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
                 const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const code = window.BarcodeScanner.decode(imageData, drawDebugImage);
                 
-                // ファジー抽出解析
-                const result = window.BarcodeScanner.decode(imageData, drawDebugImage);
-                
-                // 安定度表示のインジケーター表示を更新
-                let gauge = "🔲🔲🔲";
-                if(result.stable === 1) gauge = "⬛🔲🔲";
-                if(result.stable === 2) gauge = "⬛⬛🔲";
-                if(result.stable >= 3) gauge = "⬛⬛⬛";
-                stableLabel.innerHTML = `バーコード検知の安定度: ${gauge}`;
-
-                if (result && result.code) {
-                    statusLabel.innerHTML = `🎉 抽出確定！ [コード: ${result.code}]`;
+                if (code) {
+                    stableLabel.innerHTML = `解析システム: 復元処理中...`;
+                    statusLabel.innerHTML = `🎉 デコード成功！ [値: ${code}]`;
                     statusLabel.style.color = "#00ff00";
                     isProcessing = true;
                     stopCamera();
-                    sendPunchData(result.code);
+                    sendPunchData(code);
                     return;
                 } else {
-                    statusLabel.innerHTML = result.msg || "解析中...";
+                    stableLabel.innerHTML = `解析システム: バーコードスキャン中`;
+                    statusLabel.innerHTML = "赤線にバーコードを合わせてください";
                     statusLabel.style.color = "#ffc107";
                 }
             }
-            scanTimer = setTimeout(tick, 50); 
+            scanTimer = setTimeout(tick, 40); // 40ms間隔で超ハイスピード判定
         }
         tick();
     }
