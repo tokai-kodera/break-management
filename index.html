@@ -1,725 +1,346 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-
-<title>休憩打刻システム</title>
-
-<style>
-*{
-    box-sizing:border-box;
-    margin:0;
-    padding:0;
-    font-family:sans-serif;
-}
-
-body{
-    background:#f0f2f5;
-    display:flex;
-    flex-direction:column;
-    align-items:center;
-    min-height:100vh;
-    padding:20px;
-}
-
-.container{
-    width:100%;
-    max-width:500px;
-    background:#fff;
-    border-radius:12px;
-    padding:20px;
-    box-shadow:0 4px 6px rgba(0,0,0,.1);
-    text-align:center;
-}
-
-h1{
-    font-size:1.5rem;
-    margin-bottom:15px;
-    color:#333;
-}
-
-#interactive{
-    position:relative;
-    width:100%;
-    height:300px;
-    background:#000;
-    border-radius:8px;
-    overflow:hidden;
-    margin-bottom:15px;
-}
-
-#interactive video{
-    position:absolute;
-    inset:0;
-    width:100%;
-    height:100%;
-    object-fit:cover;
-}
-
-.laser-line{
-    position:absolute;
-    top:50%;
-    left:10%;
-    width:80%;
-    height:2px;
-    background:red;
-    box-shadow:0 0 8px red;
-    z-index:100;
-    transform:translateY(-50%);
-    animation:blink 1s infinite;
-    pointer-events:none;
-}
-
-@keyframes blink{
-    50%{ opacity:.4; }
-}
-
-.btn{
-    display:block;
-    width:100%;
-    padding:12px;
-    font-size:1rem;
-    font-weight:bold;
-    color:#fff;
-    background:#007bff;
-    border:none;
-    border-radius:6px;
-    cursor:pointer;
-    margin-top:10px;
-}
-
-#result-box{
-    margin-top:15px;
-    padding:16px;
-    border-radius:8px;
-    font-weight:bold;
-    display:none;
-    text-align:left;
-    box-shadow:inset 0 2px 4px rgba(0,0,0,.05);
-}
-
-.success{
-    background:#e2f0d9;
-    color:#385723;
-    border:1px solid #c5e0b4;
-}
-
-.error{
-    background:#fce4d6;
-    color:#c65911;
-    border:1px solid #f8cbad;
-}
-
-.loading{
-    background:#fff2cc;
-    color:#7f6000;
-    border:1px solid #ffe599;
-    text-align:center !important;
-}
-
-.result-title{
-    font-size:1.2rem;
-    font-weight:bold;
-    margin-bottom:8px;
-}
-
-.result-item{
-    font-size:.95rem;
-    margin:4px 0;
-    font-weight:normal;
-}
-
-.time-badge{
-    display:block;
-    margin-top:12px;
-    padding:10px;
-    background:#fff;
-    border-left:5px solid #007bff;
-    border-radius:0 4px 4px 0;
-    font-size:1rem;
-    font-weight:bold;
-}
-
-.time-badge span{
-    color:#d83b01;
-    font-size:1.5rem;
-    float:right;
-    font-weight:800;
-}
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>休憩打刻システム</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: sans-serif; }
+        body { background: #f0f2f5; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 20px; }
+        .container { width: 100%; max-width: 500px; background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
+        h1 { font-size: 1.5rem; margin-bottom: 15px; color: #333; }
+        #interactive { position: relative; width: 100%; height: 300px; background: #000; border-radius: 8px; overflow: hidden; margin-bottom: 15px; }
+        #interactive video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
+        .laser-line { position: absolute; top: 50%; left: 10%; width: 80%; height: 2px; background: red; box-shadow: 0 0 8px red; z-index: 10; transform: translateY(-50%); animation: blink 1s infinite; }
+        @keyframes blink { 50% { opacity: 0.4; } }
+        .btn { display: block; width: 100%; padding: 12px; font-size: 1rem; font-weight: bold; color: white; background: #007bff; border: none; border-radius: 6px; cursor: pointer; margin-top: 10px; }
+        
+        #result-box { margin-top: 15px; padding: 16px; border-radius: 8px; font-weight: bold; display: none; text-align: left; box-shadow: inset 0 2px 4px rgba(0,0,0,0.05); }
+        .success { background: #e2f0d9; color: #385723; border: 1px solid #c5e0b4; }
+        .error { background: #fce4d6; color: #c65911; border: 1px solid #f8cbad; }
+        .loading { background: #fff2cc; color: #7f6000; border: 1px solid #ffe599; text-align: center !important; }
+        
+        .result-title { font-size: 1.2rem; font-weight: bold; margin-bottom: 8px; border-bottom: 1px solid rgba(0,0,0,0.1); padding-bottom: 4px; }
+        .result-item { font-size: 0.95rem; margin: 4px 0; font-weight: normal; }
+        .result-item strong { font-weight: bold; color: #000; }
+        .time-badge { display: block; margin-top: 12px; padding: 10px; background: #ffffff; border-left: 5px solid #007bff; border-radius: 0 4px 4px 0; font-size: 1rem; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .time-badge span { color: #d83b01; font-size: 1.5rem; float: right; line-height: 1; margin-top: -2px; font-weight: 800; }
+    </style>
 </head>
-
 <body>
 
 <div class="container">
-
     <h1>バーコードかざすだけ打刻</h1>
-
-    <div id="interactive">
+    <div id="interactive" class="viewport">
         <div class="laser-line"></div>
     </div>
-
-    <button id="retry-btn"
-            class="btn"
-            style="display:none;"
-            onclick="startCamera()">
-        スキャン再開
-    </button>
-
+    <button id="retry-btn" class="btn" style="display:none;" onclick="startCamera()">スキャン再開</button>
     <div id="result-box"></div>
-
 </div>
 
 <script>
-/* =========================================================
-   BarcodeScanner
-========================================================= */
-
-window.BarcodeScanner = (function(){
-
-    const C39_CHARS =
-        "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. *$/+%";
-
-    const C39_PATTERNS = [
-        0x034,0x120,0x030,0x110,0x014,0x104,0x024,0x005,0x101,0x021,
-        0x140,0x050,0x150,0x044,0x144,0x054,0x00c,0x10c,0x02c,0x012,
-        0x112,0x032,0x122,0x042,0x142,0x052,0x003,0x103,0x023,0x00b,
-        0x10b,0x02b,0x11a,0x02a,0x12a,0x04a,0x009,0x109,0x029,0x006,
-        0x060,0x068,0x0a0
-    ];
-
-    function decode(imageData){
-
-        const width  = imageData.width;
-        const height = imageData.height;
-        const data   = imageData.data;
-
-        const rows = [
-            Math.floor(height * 0.45),
-            Math.floor(height * 0.50),
-            Math.floor(height * 0.55)
+    // 💡 CODE39 & CODE128 両対応ハイブリッド解析エンジン
+    !function(e){"use strict";
+        // --- CODE39 用定義データ ---
+        const C39_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. *$/+%";
+        const C39_PATTERNS = [
+            0x034, 0x120, 0x030, 0x110, 0x014, 0x104, 0x024, 0x005, 0x101, 0x021,
+            0x140, 0x050, 0x150, 0x044, 0x144, 0x054, 0x00c, 0x10c, 0x02c, 0x012,
+            0x112, 0x032, 0x122, 0x042, 0x142, 0x052, 0x003, 0x103, 0x023, 0x00b,
+            0x10b, 0x02b, 0x11a, 0x02a, 0x12a, 0x04a, 0x009, 0x109, 0x029, 0x006,
+            0x060, 0x068, 0x0a0
         ];
 
-        for(const y of rows){
+        // --- CODE128 用定義データ ---
+        const C128_PATTERNS = {
+            "212222":0,"222122":1,"222221":2,"121223":3,"121322":4,"131222":5,"122213":6,"122312":7,"132212":8,"221213":9,
+            "221312":10,"231212":11,"112232":12,"122132":13,"122231":14,"113222":15,"123122":16,"123221":17,"223211":18,"221132":19,
+            "221231":20,"213212":21,"223112":22,"312131":23,"311222":24,"321122":25,"321221":26,"312212":27,"322112":28,"322211":29,
+            "212123":30,"212312":31,"232112":32,"111323":33,"131123":34,"131321":35,"112313":36,"132113":37,"132311":38,"211313":39,
+            "231113":40,"231311":41,"112133":42,"112331":43,"132131":44,"113123":45,"113321":46,"133121":47,"313121":48,"211331":49,
+            "231131":50,"213113":51,"213311":52,"213131":53,"311123":54,"311321":55,"331121":56,"312113":57,"312311":58,"332111":59,
+            "314111":60,"221411":61,"431111":62,"111224":63,"111422":64,"121124":65,"121421":66,"141122":67,"141221":68,"112214":69,
+            "112412":70,"122114":71,"122411":72,"142112":73,"142211":74,"241211":75,"221114":76,"413111":77,"241112":78,"134111":79,
+            "111242":80,"121142":81,"121241":82,"114212":83,"124112":84,"124211":85,"411212":86,"421112":87,"421211":88,"212141":89,
+            "214121":90,"412121":91,"111143":92,"111341":93,"131141":94,"114113":95,"114311":96,"411113":97,"411311":98,"113141":99,
+            "114131":100,"311141":101,"411131":102,"211412":103,"211214":104,"211232":105
+        };
 
-            let brightness = new Uint8Array(width);
+        e.decode = function(imageData) {
+            const width = imageData.width;
+            const height = imageData.height;
+            const data = imageData.data;
 
-            let min = 255;
-            let max = 0;
+            const rows = [Math.floor(height * 0.50), Math.floor(height * 0.46), Math.floor(height * 0.54)];
 
-            for(let x=0;x<width;x++){
+            for (let y of rows) {
+                let brightness = new Uint8Array(width);
+                let min = 255, max = 0;
+                
+                for (let x = 0; x < width; x++) {
+                    const idx = 4 * (y * width + x);
+                    const b = Math.round(data[idx]*0.299 + data[idx+1]*0.587 + data[idx+2]*0.114);
+                    brightness[x] = b;
+                    if (b < min) min = b;
+                    if (b > max) max = b;
+                }
 
-                const idx = 4 * (y * width + x);
+                if (max - min < 40) continue; 
+                const threshold = (min + max) / 2;
 
-                const b =
-                    data[idx] * 0.299 +
-                    data[idx+1] * 0.587 +
-                    data[idx+2] * 0.114;
+                let binary = new Uint8Array(width);
+                for (let x = 0; x < width; x++) {
+                    binary[x] = brightness[x] < threshold ? 1 : 0; 
+                }
 
-                brightness[x] = b;
+                let runs = [];
+                let currentBit = binary[0];
+                let runLen = 1;
+                for (let x = 1; x < width; x++) {
+                    if (binary[x] === currentBit) {
+                        runLen++;
+                    } else {
+                        runs.push({ isBlack: currentBit === 1, width: runLen });
+                        currentBit = binary[x];
+                        runLen = 1;
+                    }
+                }
+                runs.push({ isBlack: currentBit === 1, width: runLen });
 
-                if(b < min) min = b;
-                if(b > max) max = b;
+                if (runs.length < 15) continue;
+
+                // 🌟 【判定1】CODE128 のスキャン試行
+                const code128Res = tryCODE128(runs);
+                if (code128Res) return code128Res;
+
+                // 🌟 【判定2】CODE39 のスキャン試行（小寺さんのバーコード用）
+                const code39Res = tryCODE39(runs);
+                if (code39Res) return code39Res;
             }
+            return null;
+        };
 
-            if(max - min < 35){
-                continue;
-            }
-
-            const threshold = (min + max) / 2;
-
-            const binary = new Uint8Array(width);
-
-            for(let x=0;x<width;x++){
-                binary[x] = brightness[x] < threshold ? 1 : 0;
-            }
-
-            let runs = [];
-
-            let current = binary[0];
-            let len = 1;
-
-            for(let x=1;x<width;x++){
-
-                if(binary[x] === current){
-                    len++;
-                }else{
-                    runs.push({
-                        isBlack: current === 1,
-                        width: len
-                    });
-
-                    current = binary[x];
-                    len = 1;
+        // CODE128 解析コア
+        function tryCODE128(runs) {
+            let startIdx = runs[0].isBlack ? 0 : 1;
+            for (let i = startIdx; i < runs.length - 7; i += 2) {
+                let charModules = 0;
+                for(let j=0; j<6; j++) charModules += runs[i+j].width;
+                if(charModules === 0) continue;
+                
+                let ratioStr = "";
+                for(let j=0; j<6; j++) ratioStr += Math.round((runs[i+j].width / charModules) * 11);
+                
+                if (C128_PATTERNS[ratioStr] === 104) { // START B 検出
+                    let resultText = "";
+                    let k = i + 6;
+                    while (k < runs.length - 4) {
+                        let totalW = 0;
+                        for(let m=0; m<6; m++) totalW += runs[k+m].width;
+                        if(totalW === 0) break;
+                        
+                        let cRatioStr = "";
+                        for(let m=0; m<6; m++) cRatioStr += Math.round((runs[k+m].width / totalW) * 11);
+                        let val = C128_PATTERNS[cRatioStr];
+                        if (val === undefined) break;
+                        if (val >= 106) { if (resultText.length > 0) return resultText; break; } // STOPコード
+                        if (val < 96) resultText += String.fromCharCode(val + 32);
+                        k += 6;
+                    }
                 }
             }
-
-            runs.push({
-                isBlack: current === 1,
-                width: len
-            });
-
-            const code39 = tryCODE39(runs);
-
-            if(code39){
-                return code39;
-            }
+            return null;
         }
 
-        return null;
-    }
+        // CODE39 解析コア
+        function tryCODE39(runs) {
+            for (let i = 0; i < runs.length - 9; i++) {
+                if (!runs[i].isBlack) continue; 
 
-    function tryCODE39(runs){
+                let elements = [];
+                for (let j = 0; j < 9; j++) elements.push(runs[i + j].width);
 
-        for(let i=0;i<runs.length-9;i++){
+                let sorted = [...elements].sort((a, b) => a - b);
+                let thresholdW = (sorted[3] + sorted[4]) / 2;
 
-            if(!runs[i].isBlack){
-                continue;
-            }
-
-            let elements = [];
-
-            for(let j=0;j<9;j++){
-                elements.push(runs[i+j].width);
-            }
-
-            const sorted =
-                [...elements].sort((a,b)=>a-b);
-
-            const threshold =
-                (sorted[3] + sorted[4]) / 2;
-
-            let bit = 0;
-
-            for(let j=0;j<9;j++){
-
-                bit <<= 1;
-
-                if(elements[j] > threshold){
-                    bit |= 1;
-                }
-            }
-
-            const match =
-                C39_PATTERNS.indexOf(bit);
-
-            if(match === -1){
-                continue;
-            }
-
-            if(C39_CHARS[match] !== '*'){
-                continue;
-            }
-
-            let result = "";
-            let k = i + 10;
-
-            while(k <= runs.length - 9){
-
-                if(runs[k] && !runs[k].isBlack){
-                    k++;
+                let patternBit = 0;
+                for (let j = 0; j < 9; j++) {
+                    patternBit <<= 1;
+                    if (elements[j] > thresholdW) patternBit |= 1;
                 }
 
-                let ce = [];
+                let matchIdx = C39_PATTERNS.indexOf(patternBit);
+                if (matchIdx !== -1 && C39_CHARS[matchIdx] === '*') { 
+                    let resultText = "";
+                    let k = i + 10; 
 
-                for(let j=0;j<9;j++){
+                    while (k <= runs.length - 9) {
+                        if (runs[k] && !runs[k].isBlack) k++; 
 
-                    if(!runs[k+j]){
-                        break;
-                    }
+                        let cElements = [];
+                        for (let j = 0; j < 9; j++) {
+                            if (runs[k + j]) cElements.push(runs[k + j].width);
+                        }
+                        if (cElements.length < 9) break;
 
-                    ce.push(runs[k+j].width);
-                }
+                        let cSorted = [...cElements].sort((a, b) => a - b);
+                        let cThresh = (cSorted[3] + cSorted[4]) / 2;
 
-                if(ce.length < 9){
-                    break;
-                }
+                        let cBit = 0;
+                        for (let j = 0; j < 9; j++) {
+                            cBit <<= 1;
+                            if (cElements[j] > cThresh) cBit |= 1;
+                        }
 
-                const cs =
-                    [...ce].sort((a,b)=>a-b);
+                        let idx = C39_PATTERNS.indexOf(cBit);
+                        if (idx === -1) break;
 
-                const ct =
-                    (cs[3] + cs[4]) / 2;
-
-                let cb = 0;
-
-                for(let j=0;j<9;j++){
-
-                    cb <<= 1;
-
-                    if(ce[j] > ct){
-                        cb |= 1;
+                        let char = C39_CHARS[idx];
+                        if (char === '*') {
+                            if (resultText.length > 0) return resultText; 
+                            break;
+                        }
+                        resultText += char;
+                        k += 10; 
                     }
                 }
-
-                const idx =
-                    C39_PATTERNS.indexOf(cb);
-
-                if(idx === -1){
-                    break;
-                }
-
-                const ch = C39_CHARS[idx];
-
-                if(ch === '*'){
-
-                    if(result.length > 0){
-                        return result;
-                    }
-
-                    break;
-                }
-
-                result += ch;
-
-                k += 10;
             }
+            return null;
         }
-
-        return null;
-    }
-
-    return {
-        decode
-    };
-
-})();
+    }(this.BarcodeScanner = {});
 </script>
 
 <script>
-/* =========================================================
-   Main
-========================================================= */
+    const GAS_API_URL = "https://script.google.com/macros/s/AKfycbzLB0lat0ynkK-oTwuaZvvlGOXmMl_-XGwZhEP-0QeYs-m3T-l8tbFov9y0Fhhhe14qlg/exec"; 
+    let activeStream = null;
+    let isProcessing = false;
+    let scanTimer = null;
 
-const GAS_API_URL =
-    "https://script.google.com/macros/s/AKfycbzLB0lat0ynkK-oTwuaZvvlGOXmMl_-XGwZhEP-0QeYs-m3T-l8tbFov9y0Fhhhe14qlg/exec";
+    async function startCamera() {
+        document.getElementById('retry-btn').style.display = 'none';
+        hideResult();
+        isProcessing = false;
+        stopCamera();
 
-let activeStream = null;
-let scanTimer = null;
-let isProcessing = false;
+        const videoContainer = document.getElementById('interactive');
+        const oldVideo = videoContainer.querySelector('video');
+        if(oldVideo) oldVideo.remove();
+        
+        const video = document.createElement('video');
+        video.setAttribute('autoplay', 'true');
+        video.setAttribute('playsinline', 'true');
+        video.setAttribute('webkit-playsinline', 'true');
+        video.setAttribute('muted', 'true');
+        video.style.position = 'absolute';
+        video.style.top = '0';
+        video.style.left = '0';
+        video.style.width = '100%';
+        video.style.height = '100%';
+        video.style.objectFit = 'cover';
+        videoContainer.appendChild(video);
 
-async function startCamera(){
-
-    if(isProcessing){
-        return;
-    }
-
-    hideResult();
-
-    document.getElementById("retry-btn").style.display = "none";
-
-    stopCamera();
-
-    const container =
-        document.getElementById("interactive");
-
-    const oldVideo =
-        container.querySelector("video");
-
-    if(oldVideo){
-        oldVideo.remove();
-    }
-
-    const video =
-        document.createElement("video");
-
-    video.autoplay = true;
-    video.playsInline = true;
-    video.muted = true;
-
-    container.appendChild(video);
-
-    try{
-
-        const stream =
-            await navigator.mediaDevices.getUserMedia({
-                video:{
-                    facingMode:{
-                        ideal:"environment"
-                    },
-                    width:{ ideal:1280 },
-                    height:{ ideal:720 }
-                },
-                audio:false
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                    facingMode: "environment",
+                    width: { ideal: 640 },
+                    height: { ideal: 480 }
+                }
             });
-
-        activeStream = stream;
-
-        video.srcObject = stream;
-
-        await video.play();
-
-        startScanLoop(video);
-
-    }catch(err){
-
-        console.error(err);
-
-        showResult(
-            `
-            <div class="result-title">
-                カメラ起動エラー
-            </div>
-
-            <div class="result-item">
-                カメラ権限を許可してください
-            </div>
-            `,
-            true
-        );
-    }
-}
-
-function startScanLoop(video){
-
-    const canvas =
-        document.createElement("canvas");
-
-    const ctx =
-        canvas.getContext("2d", {
-            willReadFrequently:true
-        });
-
-    async function tick(){
-
-        if(isProcessing){
-            return;
+            activeStream = stream;
+            video.srcObject = stream;
+            video.play().catch(e => console.log(e));
+            startInternalLoop();
+        } catch (err) {
+            console.error(err);
+            showResult("<div class='result-title'>カメラ起動エラー</div><div class='result-item'>カメラ権限を設定で許可してください。</div>", true);
         }
+    }
 
-        if(
-            video.readyState >= 2 &&
-            video.videoWidth > 0
-        ){
+    function startInternalLoop() {
+        const video = document.querySelector('#interactive video');
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
 
-            canvas.width  = video.videoWidth;
-            canvas.height = video.videoHeight;
-
-            ctx.drawImage(
-                video,
-                0,
-                0,
-                canvas.width,
-                canvas.height
-            );
-
-            const imageData =
-                ctx.getImageData(
-                    0,
-                    0,
-                    canvas.width,
-                    canvas.height
-                );
-
-            const result =
-                window.BarcodeScanner.decode(imageData);
-
-            if(result){
-
-                isProcessing = true;
-
-                navigator.vibrate?.(120);
-
-                stopCamera();
-
-                await sendPunchData(result);
-
-                return;
+        function tick() {
+            if (isProcessing) return;
+            if (video && video.readyState === video.HAVE_ENOUGH_DATA) {
+                canvas.width = 640;
+                canvas.height = 480;
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const code = window.BarcodeScanner.decode(imageData);
+                
+                if (code) {
+                    isProcessing = true;
+                    stopCamera();
+                    sendPunchData(code);
+                    return;
+                }
             }
+            scanTimer = setTimeout(tick, 50); 
         }
-
-        scanTimer =
-            setTimeout(tick, 80);
+        tick();
     }
 
-    tick();
-}
-
-function stopCamera(){
-
-    if(scanTimer){
-        clearTimeout(scanTimer);
-        scanTimer = null;
+    function stopCamera() {
+        if (scanTimer) { clearTimeout(scanTimer); scanTimer = null; }
+        if (activeStream) {
+            activeStream.getTracks().forEach(track => track.stop());
+            activeStream = null;
+        }
+        const video = document.querySelector('#interactive video');
+        if (video) { video.srcObject = null; video.remove(); }
     }
 
-    if(activeStream){
-
-        activeStream
-            .getTracks()
-            .forEach(track => track.stop());
-
-        activeStream = null;
-    }
-
-    const video =
-        document.querySelector("#interactive video");
-
-    if(video){
-
-        video.pause();
-
-        video.srcObject = null;
-
-        video.remove();
-    }
-}
-
-async function sendPunchData(employeeCode){
-
-    const cleanCode =
-        employeeCode.replace(/\*/g,"").trim();
-
-    showLoading(`
-        データ照合中...<br>
-        [コード: ${cleanCode}]
-    `);
-
-    try{
-
-        const response =
-            await fetch(GAS_API_URL, {
-                method:"POST",
-                mode:"cors",
-                headers:{
-                    "Content-Type":
-                    "application/x-www-form-urlencoded"
-                },
-                body:new URLSearchParams({
-                    employeeCode: cleanCode
-                })
+    async function sendPunchData(employeeCode) {
+        let cleanCode = employeeCode.replace(/\*/g, "").trim();
+        showLoading(`データ照合中...<br>[コード: ${cleanCode}]`);
+        try {
+            const response = await fetch(GAS_API_URL, {
+                method: "POST",
+                mode: "cors",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({ employeeCode: cleanCode })
             });
-
-        if(!response.ok){
-            throw new Error(
-                "HTTP ERROR : " + response.status
-            );
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                const statusTitle = data.action === "break_start" ? "🟢 休憩開始を記録しました" : "🔴 休憩終了を記録しました";
+                const html = `
+                    <div class="result-title">${statusTitle}</div>
+                    <div class="result-item">従業員名: <strong>${data.employeeName}</strong></div>
+                    <div class="result-item">社員コード: <strong>${cleanCode}</strong></div>
+                    <div class="time-badge">過去12時間の合計休憩時間 <span>${data.totalBreakTime || 0} 分</span></div>
+                `;
+                showResult(html, false);
+            } else {
+                showResult(`<div class="result-title">打刻エラー</div><div class="result-item">${data.message}</div>`, true);
+            }
+        } catch (error) {
+            console.error(error);
+            showResult("<div class='result-title'>通信エラー</div><div class='result-item'>サーバーからの応答受信に失敗しました。</div>", true);
+        } finally {
+            setTimeout(() => { startCamera(); }, 4000);
         }
-
-        const data =
-            await response.json();
-
-        if(data.success){
-
-            const title =
-                data.action === "break_start"
-                ? "🟢 休憩開始を記録しました"
-                : "🔴 休憩終了を記録しました";
-
-            showResult(
-                `
-                <div class="result-title">
-                    ${title}
-                </div>
-
-                <div class="result-item">
-                    従業員名:
-                    <strong>${escapeHtml(data.employeeName)}</strong>
-                </div>
-
-                <div class="result-item">
-                    社員コード:
-                    <strong>${escapeHtml(cleanCode)}</strong>
-                </div>
-
-                <div class="time-badge">
-                    過去12時間の合計休憩時間
-                    <span>${data.totalBreakTime || 0} 分</span>
-                </div>
-                `,
-                false
-            );
-
-        }else{
-
-            showResult(
-                `
-                <div class="result-title">
-                    打刻エラー
-                </div>
-
-                <div class="result-item">
-                    ${escapeHtml(data.message || "不明なエラー")}
-                </div>
-                `,
-                true
-            );
-        }
-
-    }catch(err){
-
-        console.error(err);
-
-        showResult(
-            `
-            <div class="result-title">
-                通信エラー
-            </div>
-
-            <div class="result-item">
-                サーバー通信に失敗しました
-            </div>
-            `,
-            true
-        );
-
-    }finally{
-
-        setTimeout(()=>{
-            isProcessing = false;
-            startCamera();
-        },3000);
     }
-}
 
-function escapeHtml(str){
-
-    return String(str)
-        .replace(/&/g,"&amp;")
-        .replace(/</g,"&lt;")
-        .replace(/>/g,"&gt;")
-        .replace(/"/g,"&quot;")
-        .replace(/'/g,"&#039;");
-}
-
-function showLoading(msg){
-
-    const box =
-        document.getElementById("result-box");
-
-    box.className = "loading";
-    box.innerHTML = msg;
-    box.style.display = "block";
-}
-
-function showResult(html, isError){
-
-    const box =
-        document.getElementById("result-box");
-
-    box.className =
-        isError ? "error" : "success";
-
-    box.innerHTML = html;
-
-    box.style.display = "block";
-
-    if(isError){
-        document.getElementById("retry-btn")
-            .style.display = "block";
+    function showLoading(msg) {
+        const box = document.getElementById('result-box');
+        box.className = "loading"; box.innerHTML = msg; box.style.display = "block";
     }
-}
 
-function hideResult(){
+    function showResult(html, isError) {
+        const box = document.getElementById('result-box');
+        box.className = isError ? "error" : "success"; box.innerHTML = html; box.style.display = "block";
+        if(isError) document.getElementById('retry-btn').style.display = 'block';
+    }
 
-    document.getElementById("result-box")
-        .style.display = "none";
-}
+    function hideResult() { document.getElementById('result-box').style.display = "none"; }
 
-window.addEventListener(
-    "load",
-    startCamera
-);
+    window.onload = startCamera;
 </script>
-
 </body>
 </html>
