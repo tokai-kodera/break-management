@@ -14,10 +14,18 @@
         .laser-line { position: absolute; top: 50%; left: 10%; width: 80%; height: 2px; background: red; box-shadow: 0 0 8px red; z-index: 10; transform: translateY(-50%); animation: blink 1s infinite; }
         @keyframes blink { 50% { opacity: 0.4; } }
         .btn { display: block; width: 100%; padding: 12px; font-size: 1rem; font-weight: bold; color: white; background: #007bff; border: none; border-radius: 6px; cursor: pointer; margin-top: 10px; }
-        #result-box { margin-top: 15px; padding: 12px; border-radius: 6px; font-weight: bold; display: none; text-align: center; }
-        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-        .loading { background: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
+        
+        /* 🚨 UIアップデート：過去12時間の合計休憩時間を視認しやすく拡張 */
+        #result-box { margin-top: 15px; padding: 16px; border-radius: 8px; font-weight: bold; display: none; text-align: left; box-shadow: inset 0 2px 4px rgba(0,0,0,0.05); }
+        .success { background: #e2f0d9; color: #385723; border: 1px solid #c5e0b4; }
+        .error { background: #fce4d6; color: #c65911; border: 1px solid #f8cbad; }
+        .loading { background: #fff2cc; color: #7f6000; border: 1px solid #ffe599; text-align: center !important; }
+        
+        .result-title { font-size: 1.2rem; font-weight: bold; margin-bottom: 8px; border-bottom: 1px solid rgba(0,0,0,0.1); padding-bottom: 4px; }
+        .result-item { font-size: 0.95rem; margin: 4px 0; font-weight: normal; }
+        .result-item strong { font-weight: bold; color: #000; }
+        .time-badge { display: block; margin-top: 10px; padding: 8px; background: #fff; border-left: 4px solid #007bff; font-size: 1rem; font-weight: bold; }
+        .time-badge span { color: #ffc000; font-size: 1.4rem; float: right; line-height: 1; margin-top: -2px; }
     </style>
 </head>
 <body>
@@ -32,8 +40,113 @@
 </div>
 
 <script>
-    // 💡 iPhoneセキュリティ突破用：超軽量・独立型バーコードデコーダー(CODE128/EAN対応)を内部に100%インライン自己完結実装
-    !function(e,t){"object"==typeof exports&&"undefined"!=typeof module?t(exports):"function"==typeof define&&define.amd?define(["exports"],t):t((e=e||self).BarcodeScanner={})}(this,function(e){"use strict";function t(e,t){var n=e.width,r=e.height,a=e.data,o=[],i=Math.floor(r/2);for(var u=0;u<n;u++){var f=4*(i*n+u);o.push(.299*a[f]+.587*a[f+1]+.114*a[f+2])}var s=[],l=o[0];for(u=1;u<o.length;u++){var c=o[u];s.push(c-l),l=c}var d=[],h=20;for(u=0;u<s.length;u++)Math.abs(s[u])>h&&d.push({pos:u,type:s[u]>0?1:-1});if(d.length<10)return null;var p=[];for(u=0;u<d.length-1;u++)p.push(d[u+1].pos-d[u].pos);return p}e.decode=function(e){var n=t(e);if(!n)return null;return function(e){if(!e||e.length<10)return null;return"TEST-EMP-CODE"}(n)},Object.defineProperty(e,"__esModule",{value:true})});
+    // 💡 堅牢版インラインCODE128デコーダー (ボケ・手ブレ対応)
+    !function(e){"use strict";
+        // CODE128Bのパターンテーブル (バー3本、スペース3本のモジュール幅比率)
+        const PATTERNS = {
+            "212222":0,"222122":1,"222221":2,"121223":3,"121322":4,"131222":5,"122213":6,"122312":7,"132212":8,"221213":9,
+            "221312":10,"231212":11,"112232":12,"122132":13,"122231":14,"113222":15,"123122":16,"123221":17,"223211":18,"221132":19,
+            "221231":20,"213212":21,"223112":22,"312131":23,"311222":24,"321122":25,"321221":26,"312212":27,"322112":28,"322211":29,
+            "212123":30,"212312":31,"232112":32,"111323":33,"131123":34,"131321":35,"112313":36,"132113":37,"132311":38,"211313":39,
+            "231113":40,"231311":41,"112133":42,"112331":43,"132131":44,"113123":45,"113321":46,"133121":47,"313121":48,"211331":49,
+            "231131":50,"213113":51,"213311":52,"213131":53,"311123":54,"311321":55,"331121":56,"312113":57,"312311":58,"332111":59,
+            "314111":60,"221411":61,"431111":62,"111224":63,"111422":64,"121124":65,"121421":66,"141122":67,"141221":68,"112214":69,
+            "112412":70,"122114":71,"122411":72,"142112":73,"142211":74,"241211":75,"221114":76,"413111":77,"241112":78,"134111":79,
+            "111242":80,"121142":81,"121241":82,"114212":83,"124112":84,"124211":85,"411212":86,"421112":87,"421211":88,"212141":89,
+            "214121":90,"412121":91,"111143":92,"111341":93,"131141":94,"114113":95,"114311":96,"411113":97,"411311":98,"113141":99,
+            "114131":100,"311141":101,"411131":102,"211412":103,"211214":104,"211232":105 // 103-105 START A,B,C
+        };
+
+        e.decode = function(imageData) {
+            const width = imageData.width;
+            const height = imageData.height;
+            const data = imageData.data;
+
+            // 調整ポイント: 手ブレ・傾きに対応するため、中心上下の3ラインを独立走査
+            const targetRows = [Math.floor(height * 0.45), Math.floor(height * 0.50), Math.floor(height * 0.55)];
+
+            for (let y of targetRows) {
+                // 1. 動的二値化のための輝度抽出とローカル閾値の算出
+                let brightness = new Uint8Array(width);
+                let min = 255, max = 0;
+                for (let x = 0; x < width; x++) {
+                    const idx = 4 * (y * width + x);
+                    const b = Math.round(data[idx]*0.299 + data[idx+1]*0.587 + data[idx+2]*0.114);
+                    brightness[x] = b;
+                    if (b < min) min = b;
+                    if (b > max) max = b;
+                }
+
+                // コントラストが低すぎる（バーコードがない）場合は次のラインへ
+                if (max - min < 50) continue;
+                const threshold = (min + max) / 2;
+
+                // 2. ランレングス（白黒のバーの太さカウント）へ変換
+                let runs = [];
+                let isBlack = brightness[0] < threshold;
+                let runLength = 1;
+                for (let x = 1; x < width; x++) {
+                    let currentIsBlack = brightness[x] < threshold;
+                    if (currentIsBlack === isBlack) {
+                        runLength++;
+                    } else {
+                        runs.push(runLength);
+                        isBlack = currentIsBlack;
+                        runLength = 1;
+                    }
+                }
+                runs.push(runLength);
+
+                // 最小本数ガード（CODE128は最低でも開始、1文字、終了、STOPで18エレメント以上必要）
+                if (runs.length < 18) continue;
+
+                // 3. パターンマッチングとデコード
+                // 先頭のクワイエットゾーン（白い余白）を飛ばすため、最初の黒（インデックス1または2）から走査
+                let startIdx = runs[0] > 20 ? 1 : 0;
+                
+                for (let i = startIdx; i < runs.length - 7; i += 2) {
+                    // CODE128の開始コード(START B = 比率211214)を探す
+                    let charModules = 0;
+                    for(let j=0; j<6; j++) charModules += runs[i+j];
+                    
+                    let ratioStr = "";
+                    for(let j=0; j<6; j++) ratioStr += Math.round((runs[i+j] / charModules) * 11);
+                    
+                    if (PATTERNS[ratioStr] === 104) { // START B検出成功
+                        let resultText = "";
+                        let k = i + 6;
+                        let checksum = 104;
+                        let charCount = 1;
+
+                        while (k < runs.length - 4) {
+                            let totalW = 0;
+                            for(let m=0; m<6; m++) totalW += runs[k+m];
+                            
+                            let cRatioStr = "";
+                            for(let m=0; m<6; m++) cRatioStr += Math.round((runs[k+m] / totalW) * 11);
+                            
+                            let val = PATTERNS[cRatioStr];
+                            if (val === undefined) break; // 読み取り不可文字でブレイク
+                            
+                            if (val >= 106) { // STOPコード検出
+                                if (resultText.length > 0) return resultText; // 簡易的に確定
+                                break;
+                            }
+
+                            if (val < 96) {
+                                resultText += String.fromCharCode(val + 32); // CODE128Bの文字変換
+                            }
+                            
+                            checksum += val * charCount;
+                            charCount++;
+                            k += 6;
+                        }
+                    }
+                }
+            }
+            return null; // このフレームでは検出なし
+        };
+    }(this.BarcodeScanner = {});
 
     const GAS_API_URL = "https://script.google.com/macros/s/AKfycbzLB0lat0ynkK-oTwuaZvvlGOXmMl_-XGwZhEP-0QeYs-m3T-l8tbFov9y0Fhhhe14qlg/exec"; 
     let activeStream = null;
@@ -47,8 +160,6 @@
         stopCamera();
 
         const videoContainer = document.getElementById('interactive');
-        
-        // 既存のビデオをクリアしてiPhone用に最適な設定で再生成
         const oldVideo = videoContainer.querySelector('video');
         if(oldVideo) oldVideo.remove();
         
@@ -69,19 +180,17 @@
             const stream = await navigator.mediaDevices.getUserMedia({
                 video: {
                     facingMode: "environment",
-                    width: { ideal: 640 },
-                    height: { ideal: 480 }
+                    width: { ideal: 1280 }, // 💡 精度向上のため、HD解像度を要求（軽量ロジックなので耐えられます）
+                    height: { ideal: 720 }
                 }
             });
             activeStream = stream;
             video.srcObject = stream;
             await video.play();
-
-            // 外部ライブラリを一切通さず、自律ループへ移行
             startInternalLoop();
         } catch (err) {
             console.error(err);
-            showResult("カメラの起動に失敗しました。iPhoneの『設定』＞『Safari』＞『カメラ』が許可されているか確認してください。", true);
+            showResult("<div class='result-title'>カメラ起動エラー</div><div class='result-item'>iPhoneの『設定』＞『Safari』＞『カメラ』のアクセス権が許可されているか確認してください。</div>", true);
         }
     }
 
@@ -90,16 +199,17 @@
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
 
-        async function tick() {
+        function tick() {
             if (isProcessing) return;
-            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+            if (video && video.readyState === video.HAVE_ENOUGH_DATA) {
+                // 解析用のCanvas解像度を確保
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                 
-                // 埋め込み型のデコーダーで直接解析
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                 const code = window.BarcodeScanner.decode(imageData);
+                
                 if (code) {
                     isProcessing = true;
                     stopCamera();
@@ -107,7 +217,7 @@
                     return;
                 }
             }
-            scanTimer = setTimeout(tick, 150); // 150ms間隔で超軽量スキャン
+            scanTimer = setTimeout(tick, 100); // 100ms間隔で高速スキャン
         }
         tick();
     }
@@ -122,20 +232,38 @@
         if (video) { video.srcObject = null; video.remove(); }
     }
 
+    // 💡 連携通信の完全修正（CORS通信を受け取り、実績時間をUI反映する）
     async function sendPunchData(employeeCode) {
-        showLoading(`送信中... [コード: ${employeeCode}]`);
+        showLoading(`データ照合中...<br>[コード: ${employeeCode}]`);
         try {
-            await fetch(GAS_API_URL, {
+            // 🚨 CORSを安全に通過させレスポンスを得るため、URLSearchParamsを使用したPOSTにシリアライズ
+            const response = await fetch(GAS_API_URL, {
                 method: "POST",
-                mode: "no-cors",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ employeeCode: employeeCode })
+                mode: "cors", // no-cors から cors へ修正！
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({ employeeCode: employeeCode })
             });
-            showResult(`打刻完了！<br>社員コード: ${employeeCode}`, false);
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                const statusTitle = data.action === "break_start" ? "🟢 休憩開始を記録しました" : "🔴 休憩終了を記録しました";
+                const html = `
+                    <div class="result-title">${statusTitle}</div>
+                    <div class="result-item">社員氏名: <strong>${data.employeeName}</strong></div>
+                    <div class="result-item">社員コード: <strong>${employeeCode}</strong></div>
+                    <div class="time-badge">過去12時間の合計休憩時間 <span>${data.totalBreakTime} 分</span></div>
+                `;
+                showResult(html, false);
+            } else {
+                showResult(`<div class="result-title">打刻エラー</div><div class="result-item">${data.message}</div>`, true);
+            }
         } catch (error) {
-            showResult("通信エラーが発生しました。", true);
+            console.error(error);
+            showResult("<div class='result-title'>通信エラー</div><div class='result-item'>サーバーとの通信に失敗しました。ネット環境を確認してください。</div>", true);
         } finally {
-            setTimeout(() => { startCamera(); }, 3000);
+            // 4秒後に自動で次のスキャンへ移行
+            setTimeout(() => { startCamera(); }, 4000);
         }
     }
 
@@ -144,9 +272,9 @@
         box.className = "loading"; box.innerHTML = msg; box.style.display = "block";
     }
 
-    function showResult(msg, isError) {
+    function showResult(html, isError) {
         const box = document.getElementById('result-box');
-        box.className = isError ? "error" : "success"; box.innerHTML = msg; box.style.display = "block";
+        box.className = isError ? "error" : "success"; box.innerHTML = html; box.style.display = "block";
         if(isError) document.getElementById('retry-btn').style.display = 'block';
     }
 
