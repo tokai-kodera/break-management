@@ -25,6 +25,11 @@
         .result-item strong { font-weight: bold; color: #000; }
         .time-badge { display: block; margin-top: 12px; padding: 10px; background: #ffffff; border-left: 5px solid #007bff; border-radius: 0 4px 4px 0; font-size: 1rem; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
         .time-badge span { color: #d83b01; font-size: 1.5rem; float: right; line-height: 1; margin-top: -2px; font-weight: 800; }
+
+        /* 🚨 【追加】認識可視化デバッグビュー用スタイル */
+        .debug-panel { margin-top: 15px; background: #333; padding: 10px; border-radius: 8px; color: #fff; text-align: left; font-size: 0.8rem; }
+        .debug-title { font-weight: bold; color: #00ff00; margin-bottom: 4px; display: flex; justify-content: space-between; }
+        #debug-canvas { width: 100%; height: 60px; background: #222; border: 1px solid #555; image-rendering: pixelated; margin-top: 5px; }
     </style>
 </head>
 <body>
@@ -36,12 +41,181 @@
     </div>
     <button id="retry-btn" class="btn" style="display:none;" onclick="startCamera()">スキャン再開</button>
     <div id="result-box"></div>
+
+    <!-- 🚨 【新機能】認識ステータスおよび解析映像の可視化パネル -->
+    <div class="debug-panel">
+        <div class="debug-title">
+            <span>🔍 内部認識ステータス</span>
+            <span id="debug-status" style="color: #ffc107;">カメラ映像パース中...</span>
+        </div>
+        <div>解析ラインの白黒認識状態（赤線の部分を2値化表示しています）:</div>
+        <canvas id="debug-canvas"></canvas>
+    </div>
 </div>
 
-<!-- 💡 【外部通信・CSP制限を完全突破】世界最高峰のZxingリーダーをインラインテキストとして直接埋め込み -->
 <script>
-    // 圧縮された高精度マルチバーコードデコーダー(CODE39 / CODE128対応安定版)
-    !function(e){"use strict";var t="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. *$/+%",n=[52,288,97,352,49,304,112,37,292,100,265,133,388,115,370,130,364,109,316,118,274,137,392,119,374,146,386,121,376,145,268,134,389,116,371,148,272,131,380,122,276,138,294,224,232,226,0],r={"212222":0,"222122":1,"222221":2,"121223":3,"121322":4,"131222":5,"122213":6,"122312":7,"132212":8,"221213":9,"221312":10,"231212":11,"112232":12,"122132":13,"122231":14,"113222":15,"123122":16,"123221":17,"223211":18,"221132":19,"221231":20,"213212":21,"223112":22,"312131":23,"311222":24,"321122":25,"321221":26,"312212":27,"322112":28,"322211":29,"212123":30,"212312":31,"232112":32,"111323":33,"131123":34,"131321":35,"112313":36,"132113":37,"132311":38,"211313":39,"231113":40,"231311":41,"112133":42,"112331":43,"132131":44,"113123":45,"113321":46,"133121":47,"313121":48,"211331":49,"231131":50,"213113":51,"213311":52,"213131":53,"311123":54,"311321":55,"331121":56,"312113":57,"312311":58,"332111":59,"314111":60,"221411":61,"431111":62,"111224":63,"111422":64,"121124":65,"121421":66,"141122":67,"141221":68,"112214":69,"112412":70,"122114":71,"122411":72,"142112":73,"142211":74,"241211":75,"221114":76,"413111":77,"241112":78,"134111":79,"111242":80,"121142":81,"121241":82,"114212":83,"124112":84,"124211":85,"411212":86,"421112":87,"421211":88,"212141":89,"214121":90,"412121":91,"111143":92,"111341":93,"131141":94,"114113":95,"114311":96,"411113":97,"411311":98,"113141":99,"114131":100,"311141":101,"411131":102,"211412":103,"211214":104,"211232":105};e.decode=function(a){var o=a.width,i=a.height,u=a.data;var f=[Math.floor(i*.42),Math.floor(i*.46),Math.floor(i*.5),Math.floor(i*.54),Math.floor(i*.58)];for(var s=0;s<f.length;s++){var l=f[s],c=[],h=0;for(var d=0;d<o;d++){var p=4*(l*o+d),g=.299*u[p]+.587*u[p+1]+.114*u[p+2];c.push(g),h+=g}var v=h/o,m=[],y=c<v,w=1;for(d=1;d<o;d++){var B=c[d]<v;B===y?w++:(m.push({isBlack:y,width:w}),y=B,w=1)}m.push({isBlack:y,width:w});if(m.length<15)continue;for(var b=0;b<m.length-7;b++){var x=0;for(var E=0;E<6;E++)x+=m[b+E].width;if(0===x)continue;var M="";for(var E=0;E<6;E++)M+=Math.round(m[b+E].width/x*11);if(104===r[M]){var bC="",C=b+6,S=!1;while(C<m.length-4){var O=0;for(var I=0;I<6;I++)O+=m[C+I].width;if(0===O)break;var k="";for(var I=0;I<6;I++)k+=Math.round(m[C+I].width/O*11);var A=r[k];if(void 0===A)break;if(A>=106){if(bC.length>0)return bC;break}A<96&&(bC+=String.fromCharCode(A+32)),C+=6}}}for(var T=0;T<m.length-9;T++){if(m[T].isBlack){var N=[];for(var q=0;q<9;q++)N.push(m[T+q].width);var R=[...N].sort(function(e,t){return e-t}),X=(R[4]+R[5])/2,z=0;for(var q=0;q<9;q++)z<<=1,N[q]>X&&(z|=1);var Y=n.indexOf(z);if(Y!=-1&&"*"===t[Y]){var _="",W=T+9,G=!1;while(W<=m.length-9){m[W]&&!m[W].isBlack&&m[W].width>3*X&&(W++);var H=[];for(var q=0;q<9;q++)m[W+q]&&H.push(m[W+q].width);if(H.length<9)break;var J=[...H].sort(function(e,t){return e-t}),K=(J[4]+J[5])/2,L=0;for(var q=0;q<9;q++)L<<=1,H[q]>K&&(L|=1);var V=n.indexOf(L);if(V==-1)break;var Q=t[V];if("*"===Q){G=!0;break}_+=Q,W+=9}if(G&&_.length>0)return _.trim()}}}}return null}(this.BarcodeScanner={});
+    // CODE39 & CODE128 ハイブリッド解析エンジン
+    !function(e){"use strict";
+        const C39_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. *$/+%";
+        const C39_PATTERNS = [
+            0x034, 0x120, 0x030, 0x110, 0x014, 0x104, 0x024, 0x005, 0x101, 0x021,
+            0x140, 0x050, 0x150, 0x044, 0x144, 0x054, 0x00c, 0x10c, 0x02c, 0x012,
+            0x112, 0x032, 0x122, 0x042, 0x142, 0x052, 0x003, 0x103, 0x023, 0x00b,
+            0x10b, 0x02b, 0x11a, 0x02a, 0x12a, 0x04a, 0x009, 0x109, 0x029, 0x006,
+            0x060, 0x068, 0x0a0
+        ];
+        const C128_PATTERNS = {
+            "212222":0,"222122":1,"222221":2,"121223":3,"121322":4,"131222":5,"122213":6,"122312":7,"132212":8,"221213":9,
+            "221312":10,"231212":11,"112232":12,"122132":13,"122231":14,"113222":15,"123122":16,"123221":17,"223211":18,"221132":19,
+            "221231":20,"213212":21,"223112":22,"312131":23,"311222":24,"321122":25,"321221":26,"312212":27,"322112":28,"322211":29,
+            "212123":30,"212312":31,"232112":32,"111323":33,"131123":34,"131321":35,"112313":36,"132113":37,"132311":38,"211313":39,
+            "231113":40,"231311":41,"112133":42,"112331":43,"132131":44,"113123":45,"113321":46,"133121":47,"313121":48,"211331":49,
+            "231131":50,"213113":51,"213311":52,"213131":53,"311123":54,"311321":55,"331121":56,"312113":57,"312311":58,"332111":59,
+            "314111":60,"221411":61,"431111":62,"111224":63,"111422":64,"121124":65,"121421":66,"141122":67,"141221":68,"112214":69,
+            "112412":70,"122114":71,"122411":72,"142112":73,"142211":74,"241211":75,"221114":76,"413111":77,"241112":78,"134111":79,
+            "111242":80,"121142":81,"121241":82,"114212":83,"124112":84,"124211":85,"411212":86,"421112":87,"421211":88,"212141":89,
+            "214121":90,"412121":91,"111143":92,"111341":93,"131141":94,"114113":95,"114311":96,"411113":97,"411311":98,"113141":99,
+            "114131":100,"311141":101,"411131":102,"211412":103,"211214":104,"211232":105
+        };
+
+        e.decode = function(imageData, drawDebugCanvas) {
+            const width = imageData.width;
+            const height = imageData.height;
+            const data = imageData.data;
+
+            // 中央・やや上・やや下の3箇所
+            const rows = [Math.floor(height * 0.50), Math.floor(height * 0.46), Math.floor(height * 0.54)];
+            let debugStatus = "バーコード未検出";
+
+            for (let i = 0; i < rows.length; i++) {
+                let y = rows[i];
+                let brightness = new Uint8Array(width);
+                let min = 255, max = 0;
+                
+                for (let x = 0; x < width; x++) {
+                    const idx = 4 * (y * width + x);
+                    const b = Math.round(data[idx]*0.299 + data[idx+1]*0.587 + data[idx+2]*0.114);
+                    brightness[x] = b;
+                    if (b < min) min = b;
+                    if (b > max) max = b;
+                }
+
+                // コントラストチェック（低すぎる場合はただの背景）
+                if (max - min < 45) {
+                    if (i === 0) debugStatus = "コントラスト不足（もっと近づけるか明るくしてください）";
+                    continue; 
+                }
+                const threshold = (min + max) / 2;
+
+                // 2値化
+                let binary = new Uint8Array(width);
+                for (let x = 0; x < width; x++) {
+                    binary[x] = brightness[x] < threshold ? 1 : 0; 
+                }
+
+                // 🚨 デバッグ用キャンバスに現在の中央走査線2値化イメージを描画
+                if (i === 0 && drawDebugCanvas) {
+                    drawDebugCanvas(binary, width);
+                }
+
+                // ランレングス配列に変換
+                let runs = [];
+                let currentBit = binary[0];
+                let runLen = 1;
+                for (let x = 1; x < width; x++) {
+                    if (binary[x] === currentBit) {
+                        runLen++;
+                    } else {
+                        runs.push({ isBlack: currentBit === 1, width: runLen });
+                        currentBit = binary[x];
+                        runLen = 1;
+                    }
+                }
+                runs.push({ isBlack: currentBit === 1, width: runLen });
+
+                if (runs.length < 15) {
+                    if (i === 0) debugStatus = "縦線の本数が足りません（ノイズ状態）";
+                    continue;
+                }
+
+                // CODE128 スキャン試行
+                const code128Res = tryCODE128(runs);
+                if (code128Res) return { code: code128Res, type: "CODE128" };
+
+                // CODE39 スキャン試行
+                const code39Res = tryCODE39(runs);
+                if (code39Res) return { code: code39Res, type: "CODE39" };
+                
+                if (i === 0) debugStatus = "線は認識中...（規格パターン不一致）";
+            }
+            return { code: null, type: null, msg: debugStatus };
+        };
+
+        function tryCODE128(runs) {
+            let startIdx = runs[0].isBlack ? 0 : 1;
+            for (let i = startIdx; i < runs.length - 7; i += 2) {
+                let charModules = 0;
+                for(let j=0; j<6; j++) charModules += runs[i+j].width;
+                if(charModules === 0) continue;
+                let ratioStr = "";
+                for(let j=0; j<6; j++) ratioStr += Math.round((runs[i+j].width / charModules) * 11);
+                if (C128_PATTERNS[ratioStr] === 104) {
+                    let resultText = "";
+                    let k = i + 6;
+                    while (k < runs.length - 4) {
+                        let totalW = 0;
+                        for(let m=0; m<6; m++) totalW += runs[k+m].width;
+                        if(totalW === 0) break;
+                        let cRatioStr = "";
+                        for(let m=0; m<6; m++) cRatioStr += Math.round((runs[k+m].width / totalW) * 11);
+                        let val = C128_PATTERNS[cRatioStr];
+                        if (val === undefined) break;
+                        if (val >= 106) { if (resultText.length > 0) return resultText; break; }
+                        if (val < 96) resultText += String.fromCharCode(val + 32);
+                        k += 6;
+                    }
+                }
+            }
+            return null;
+        }
+
+        function tryCODE39(runs) {
+            for (let i = 0; i < runs.length - 9; i++) {
+                if (!runs[i].isBlack) continue; 
+                let elements = [];
+                for (let j = 0; j < 9; j++) elements.push(runs[i + j].width);
+                let sorted = [...elements].sort((a, b) => a - b);
+                let thresholdW = (sorted[3] + sorted[4]) / 2; // 補正：境界線をより安定化
+                let patternBit = 0;
+                for (let j = 0; j < 9; j++) {
+                    patternBit <<= 1;
+                    if (elements[j] > thresholdW) patternBit |= 1;
+                }
+                let matchIdx = C39_PATTERNS.indexOf(patternBit);
+                if (matchIdx !== -1 && C39_CHARS[matchIdx] === '*') { 
+                    let resultText = "";
+                    let k = i + 10; 
+                    while (k <= runs.length - 9) {
+                        if (runs[k] && !runs[k].isBlack) k++; 
+                        let cElements = [];
+                        for (let j = 0; j < 9; j++) { if (runs[k + j]) cElements.push(runs[k + j].width); }
+                        if (cElements.length < 9) break;
+                        let cSorted = [...cElements].sort((a, b) => a - b);
+                        let cThresh = (cSorted[3] + cSorted[4]) / 2;
+                        let cBit = 0;
+                        for (let j = 0; j < 9; j++) { cBit <<= 1; if (cElements[j] > cThresh) cBit |= 1; }
+                        let idx = C39_PATTERNS.indexOf(cBit);
+                        if (idx === -1) break;
+                        let char = C39_CHARS[idx];
+                        if (char === '*') { if (resultText.length > 0) return resultText; break; }
+                        resultText += char;
+                        k += 10; 
+                    }
+                }
+            }
+            return null;
+        }
+    }(this.BarcodeScanner = {});
 </script>
 
 <script>
@@ -74,13 +248,8 @@
         videoContainer.appendChild(video);
 
         try {
-            // Zxingコアが最も高確率でエッジを検出できるHD画質に固定
             const stream = await navigator.mediaDevices.getUserMedia({
-                video: {
-                    facingMode: "environment",
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 }
-                }
+                video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } }
             });
             activeStream = stream;
             video.srcObject = stream;
@@ -88,34 +257,60 @@
             startInternalLoop();
         } catch (err) {
             console.error(err);
-            showResult("<div class='result-title'>カメラ起動エラー</div><div class='result-item'>カメラ権限を設定で許可してください。</div>", true);
+            showResult("<div class='result-title'>カメラ起動エラー</div><div class='result-item'>カメラ権限を許可してください。</div>", true);
         }
+    }
+
+    // 🚨 デバッグ描画用関数（2値化配列をビジュアル化）
+    function drawDebugImage(binaryArray, width) {
+        const dCanvas = document.getElementById('debug-canvas');
+        const dCtx = dCanvas.getContext('2d');
+        dCanvas.width = width;
+        dCanvas.height = 1; // 1マスの走査線
+        
+        const imgData = dCtx.createImageData(width, 1);
+        for (let x = 0; x < width; x++) {
+            const val = binaryArray[x] === 1 ? 0 : 255; // 黒=0, 白=255
+            const idx = x * 4;
+            imgData.data[idx] = val;     // R
+            imgData.data[idx+1] = val;   // G
+            imgData.data[idx+2] = val;   // B
+            imgData.data[idx+3] = 255;   // A
+        }
+        dCtx.putImageData(imgData, 0, 0);
     }
 
     function startInternalLoop() {
         const video = document.querySelector('#interactive video');
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
+        const statusLabel = document.getElementById('debug-status');
 
         function tick() {
             if (isProcessing) return;
             if (video && video.readyState === video.HAVE_ENOUGH_DATA) {
-                // スキャン像を、エンジンがミリ秒単位で処理できる最適バッファサイズに写像
                 canvas.width = 640;
                 canvas.height = 480;
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                 
                 const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                const code = window.BarcodeScanner.decode(imageData);
                 
-                if (code) {
+                // デコード処理と同時にデバッグ描画関数を渡す
+                const result = window.BarcodeScanner.decode(imageData, drawDebugImage);
+                
+                if (result && result.code) {
+                    statusLabel.innerHTML = `🎉 読み取り成功！ [${result.type}: ${result.code}]`;
+                    statusLabel.style.color = "#00ff00";
                     isProcessing = true;
                     stopCamera();
-                    sendPunchData(code);
+                    sendPunchData(result.code);
                     return;
+                } else {
+                    statusLabel.innerHTML = result.msg || "解析中...";
+                    statusLabel.style.color = "#ffc107";
                 }
             }
-            scanTimer = setTimeout(tick, 40); // 40ms（限界速度）で連続走査
+            scanTimer = setTimeout(tick, 50); 
         }
         tick();
     }
@@ -131,7 +326,6 @@
     }
 
     async function sendPunchData(employeeCode) {
-        // CODE39の両端に付くアスタリスク「*」を完璧に除去して純粋なコードにする
         let cleanCode = employeeCode.replace(/\*/g, "").trim();
         showLoading(`データ照合中...<br>[コード: ${cleanCode}]`);
         try {
@@ -141,9 +335,7 @@
                 headers: { "Content-Type": "application/x-www-form-urlencoded" },
                 body: new URLSearchParams({ employeeCode: cleanCode })
             });
-            
             const data = await response.json();
-            
             if (data.success) {
                 const statusTitle = data.action === "break_start" ? "🟢 休憩開始を記録しました" : "🔴 休憩終了を記録しました";
                 const html = `
@@ -160,7 +352,6 @@
             console.error(error);
             showResult("<div class='result-title'>通信エラー</div><div class='result-item'>サーバーからの応答受信に失敗しました。</div>", true);
         } finally {
-            // 4秒後に画面をスキャン状態に戻す
             setTimeout(() => { startCamera(); }, 4000);
         }
     }
