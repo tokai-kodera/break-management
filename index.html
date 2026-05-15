@@ -9,18 +9,19 @@
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: sans-serif; }
         body { background: #f0f2f5; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 20px; }
-        .container { width: 100%; max-width: 500px; background: white; border-radius: 12px; padding: 30px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
-        h1 { font-size: 1.6rem; margin-bottom: 8px; color: #333; }
-        p { font-size: 0.9rem; color: #666; margin-bottom: 25px; line-height: 1.4; }
+        .container { width: 100%; max-width: 500px; background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
+        h1 { font-size: 1.5rem; margin-bottom: 15px; color: #333; }
         
-        /* 押しやすい巨大なカメラ起動ボタン */
-        .camera-label { display: block; background: #28a745; color: white; padding: 20px 10px; font-size: 1.3rem; font-weight: bold; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 6px rgba(40,167,69,0.3); transition: background 0.2s; margin-bottom: 15px; }
-        .camera-label:active { background: #218838; }
+        /* リアルタイム映像プレビュー領域 */
+        #interactive { position: relative; width: 100%; height: 300px; background: #000; border-radius: 8px; overflow: hidden; margin-bottom: 15px; }
+        #interactive video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
         
-        /* 実際のファイルinputは見えないように隠す */
-        #file-input { display: none; }
-        
-        #result-box { margin-top: 20px; padding: 15px; border-radius: 6px; font-weight: bold; font-size: 1.1rem; display: none; text-align: center; line-break: anywhere; }
+        /* 1次元バーコード用エイム赤線 */
+        .laser-line { position: absolute; top: 50%; left: 10%; width: 80%; height: 2px; background: red; box-shadow: 0 0 8px red; z-index: 10; transform: translateY(-50%); animation: blink 1s infinite; }
+        @keyframes blink { 50% { opacity: 0.4; } }
+
+        .btn { display: block; width: 100%; padding: 12px; font-size: 1rem; font-weight: bold; color: white; background: #007bff; border: none; border-radius: 6px; cursor: pointer; margin-top: 10px; }
+        #result-box { margin-top: 15px; padding: 12px; border-radius: 6px; font-weight: bold; display: none; text-align: center; }
         .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
         .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
         .loading { background: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
@@ -29,71 +30,95 @@
 <body>
 
 <div class="container">
-    <h1>休憩打刻システム</h1>
-    <p>下のボタンを押して、従業員バーコードを撮影してください。<br>（写真は端末に保存されません）</p>
+    <h1>バーコードかざすだけ打刻</h1>
     
-    <label for="file-input" class="camera-label">📷 カメラを起動してスキャン</label>
-    <input type="file" id="file-input" accept="image/*" capture="environment" onchange="processAndDecode(this)">
+    <!-- ここにスマホカメラのリアルタイム映像が映ります（写真は一切保存されません） -->
+    <div id="interactive" class="viewport">
+        <div class="laser-line"></div>
+    </div>
 
+    <button id="retry-btn" class="btn" style="display:none;" onclick="initCameraWithDeviceSearch()">スキャンを再開する</button>
     <div id="result-box"></div>
 </div>
 
 <script>
-    // 
+    // 🔗 デプロイ済みのGASウェブアプリURLを適用済みです
     const GAS_API_URL = "https://script.google.com/macros/s/AKfycbzLB0lat0ynkK-oTwuaZvvlGOXmMl_-XGwZhEP-0QeYs-m3T-l8tbFov9y0Fhhhe14qlg/exec"; 
+    
+    let isProcessing = false;
 
-    // スマホの高画素写真をバーコード解析に最適なサイズへ縮小してから読み込ませる関数
-    function processAndDecode(input) {
-        if (!input.files || !input.files[0]) return;
-        
-        showLoading("⚡ 画像を縮小・解析中...");
-        
-        const file = input.files[0];
-        const reader = new FileReader();
+    // スマホの複数レンズから「標準の背面メインカメラ」を探してピンポイント起動する関数
+    async function initCameraWithDeviceSearch() {
+        document.getElementById('retry-btn').style.display = 'none';
+        hideResult();
 
-        reader.onload = function (e) {
-            const img = new Image();
-            img.onload = function () {
-                // キャンバスを作成して画像を自動縮小
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                
-                // バーコード解析の誤認が最も少ないとされる横幅800pxにリサイズ
-                const targetWidth = 800;
-                const scaleFactor = targetWidth / img.width;
-                canvas.width = targetWidth;
-                canvas.height = img.height * scaleFactor;
-                
-                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                
-                // 縮小したJPEGデータを生成
-                const resizedDataUrl = canvas.toDataURL('image/jpeg', 0.85);
-
-                // 縮小した画像を使ってQuaggaでバーコードを探す
-                Quagga.decodeSingle({
-                    src: resizedDataUrl,
-                    decoder: {
-                        readers: ["code_128_reader", "ean_reader", "code_39_reader"] // 主な1次元バーコードに対応
-                    },
-                    locate: true
-                }, function (result) {
-                    if (result && result.codeResult && result.codeResult.code) {
-                        const code = result.codeResult.code;
-                        sendPunchData(code);
-                    } else {
-                        showResult("バーコードを認識できませんでした。もう少し近づけるか、ピンボケしないよう明るい場所でもう一度撮影してください。", true);
+        try {
+            // 最初に対象カメラのアクセス権をブラウザに要求
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+            
+            // 端末の全カメラリストを取得
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const videoDevices = devices.filter(device => device.kind === 'videoinput');
+            
+            // 「back」「背面」「rear」などの名前が含まれるメインレンズを特定
+            let targetDeviceId = null;
+            for (const device of videoDevices) {
+                const label = device.label.toLowerCase();
+                if (label.includes('back') || label.includes('rear') || label.includes('背面')) {
+                    // 広角や超広角など複数ある場合、最初の標準レンズを優先
+                    if (!label.includes('wide') || label.includes('main')) {
+                        targetDeviceId = device.deviceId;
+                        break;
                     }
-                    input.value = ''; // 選択されたファイルをクリア
-                });
-            };
-            img.src = e.target.result;
-        };
-        reader.readAsDataURL(file);
+                }
+            }
+            
+            // ストリームを一旦閉じてQuaggaに引き渡す準備をする
+            stream.getTracks().forEach(track => track.stop());
+
+            // 割り出した最適なレンズIDを固定してQuaggaを起動
+            const constraints = targetDeviceId 
+                ? { deviceId: { exact: targetDeviceId } } 
+                : { facingMode: "environment" }; // 見つからなければ標準背面指定
+
+            Quagga.init({
+                inputStream: {
+                    name: "Live",
+                    type: "LiveStream",
+                    target: document.querySelector('#interactive'),
+                    constraints: constraints
+                },
+                decoder: {
+                    readers: ["code_128_reader", "ean_reader", "code_39_reader"] // 各種1次元バーコード対応
+                },
+                locate: true
+            }, function (err) {
+                if (err) {
+                    showResult("カメラの初期化に失敗しました。標準ブラウザ（Chrome/Safari）で開いているか確認してください。", true);
+                    return;
+                }
+                Quagga.start();
+            });
+
+        } catch (err) {
+            showResult("カメラの起動権限がありません。ブラウザの設定でカメラを「許可」にしてください。", true);
+        }
     }
 
-    // GAS APIへ送信
+    // バーコードをカメラ映像が捉えた瞬間の自動実行イベント
+    Quagga.onDetected(function (data) {
+        if (isProcessing) return;
+        const code = data.codeResult.code;
+        if (code) {
+            isProcessing = true;
+            Quagga.stop(); // 連投・重複防止のため即座に映像ストップ
+            sendPunchData(code);
+        }
+    });
+
+    // GAS APIへ打刻データを自動送信
     async function sendPunchData(employeeCode) {
-        showLoading(`打刻データを送信中... [コード: ${employeeCode}]`);
+        showLoading(`送信中... [コード: ${employeeCode}]`);
         try {
             await fetch(GAS_API_URL, {
                 method: "POST",
@@ -101,9 +126,15 @@
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ employeeCode: employeeCode })
             });
-            showResult(`打刻データを送信しました！<br>社員コード: ${employeeCode}`, false);
+            showResult(`打刻完了！<br>社員コード: ${employeeCode}`, false);
         } catch (error) {
-            showResult("通信エラーが発生しました。インターネット接続を確認してください。", true);
+            showResult("通信エラーが発生しました。", true);
+        } finally {
+            // 打刻完了・またはエラー後、3秒間結果を表示してから自動でカメラを再起動して次の人に備える
+            setTimeout(() => {
+                isProcessing = false;
+                initCameraWithDeviceSearch();
+            }, 3000);
         }
     }
 
@@ -115,7 +146,13 @@
     function showResult(msg, isError) {
         const box = document.getElementById('result-box');
         box.className = isError ? "error" : "success"; box.innerHTML = msg; box.style.display = "block";
+        if(isError) document.getElementById('retry-btn').style.display = 'block';
     }
+
+    function hideResult() { document.getElementById('result-box').style.display = "none"; }
+
+    // 画面が開いた瞬間に自動起動
+    window.onload = initCameraWithDeviceSearch;
 </script>
 </body>
 </html>
