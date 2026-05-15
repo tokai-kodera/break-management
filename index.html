@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>休憩打刻システム</title>
-    <!-- QuaggaJS 最新安定版CDN -->
-    <script src="https://cloudflare.com" integrity="sha512-bCsBoYwQMeHexqjcR2LNfSRb9wUe81wj7gHbf0mwhefpQn56rleS8Xpfd7O6zO6X8a+94F455cbe+A9S43pM3Q==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <!-- 世界標準の高速スキャナライブラリ ZXing CDN -->
+    <script type="text/javascript" src="https://unpkg.com"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: sans-serif; }
         body { background: #f0f2f5; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 20px; }
@@ -13,8 +13,8 @@
         h1 { font-size: 1.5rem; margin-bottom: 15px; color: #333; }
         
         /* リアルタイム映像プレビュー領域 */
-        #interactive { position: relative; width: 100%; height: 300px; background: #000; border-radius: 8px; overflow: hidden; margin-bottom: 15px; }
-        #interactive video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
+        #video-container { position: relative; width: 100%; height: 300px; background: #000; border-radius: 8px; overflow: hidden; margin-bottom: 15px; }
+        #video { width: 100%; height: 100%; object-fit: cover; }
         
         /* 1次元バーコード用エイム赤線 */
         .laser-line { position: absolute; top: 50%; left: 10%; width: 80%; height: 2px; background: red; box-shadow: 0 0 8px red; z-index: 10; transform: translateY(-50%); animation: blink 1s infinite; }
@@ -32,89 +32,70 @@
 <div class="container">
     <h1>バーコードかざすだけ打刻</h1>
     
-    <!-- ここにスマホカメラのリアルタイム映像が映ります（写真は一切保存されません） -->
-    <div id="interactive" class="viewport">
+    <!-- Androidで確実に映像が映るビデオ要素 -->
+    <div id="video-container">
+        <video id="video" autoplay playsinline muted></video>
         <div class="laser-line"></div>
     </div>
 
-    <button id="retry-btn" class="btn" style="display:none;" onclick="initCameraWithDeviceSearch()">スキャンを再開する</button>
+    <button id="retry-btn" class="btn" style="display:none;" onclick="startScan()">スキャンを再開する</button>
     <div id="result-box"></div>
 </div>
 
 <script>
-    // 🔗 デプロイ済みのGASウェブアプリURLを適用済みです
+    // 🔗 指定いただいたGASウェブアプリURLをセット済みです
     const GAS_API_URL = "https://script.google.com/macros/s/AKfycbzLB0lat0ynkK-oTwuaZvvlGOXmMl_-XGwZhEP-0QeYs-m3T-l8tbFov9y0Fhhhe14qlg/exec"; 
     
+    let codeReader;
     let isProcessing = false;
 
-    // スマホの複数レンズから「標準の背面メインカメラ」を探してピンポイント起動する関数
-    async function initCameraWithDeviceSearch() {
+    // ZXingによる背面カメラ強制起動とバーコード連続スキャン処理
+    async function startScan() {
         document.getElementById('retry-btn').style.display = 'none';
         hideResult();
+        isProcessing = false;
+
+        // 過去のインスタンスがあれば破棄して初期化
+        if (codeReader) { codeReader.reset(); }
+        codeReader = new ZXing.BrowserBarcodeReader();
 
         try {
-            // 最初に対象カメラのアクセス権をブラウザに要求
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+            // 端末のすべてのカメラを取得
+            const videoInputDevices = await codeReader.listVideoInputDevices();
             
-            // 端末の全カメラリストを取得
-            const devices = await navigator.mediaDevices.enumerateDevices();
-            const videoDevices = devices.filter(device => device.kind === 'videoinput');
-            
-            // 「back」「背面」「rear」などの名前が含まれるメインレンズを特定
-            let targetDeviceId = null;
-            for (const device of videoDevices) {
+            // 背面カメラ（環境用カメラ）を優先的に選択
+            let selectedDeviceId = videoInputDevices[0].deviceId;
+            for (const device of videoInputDevices) {
                 const label = device.label.toLowerCase();
-                if (label.includes('back') || label.includes('rear') || label.includes('背面')) {
-                    // 広角や超広角など複数ある場合、最初の標準レンズを優先
-                    if (!label.includes('wide') || label.includes('main')) {
-                        targetDeviceId = device.deviceId;
-                        break;
-                    }
+                if (label.includes('back') || label.includes('rear') || label.includes('背面') || label.includes('環境')) {
+                    selectedDeviceId = device.deviceId;
+                    break; 
                 }
             }
-            
-            // ストリームを一旦閉じてQuaggaに引き渡す準備をする
-            stream.getTracks().forEach(track => track.stop());
 
-            // 割り出した最適なレンズIDを固定してQuaggaを起動
-            const constraints = targetDeviceId 
-                ? { deviceId: { exact: targetDeviceId } } 
-                : { facingMode: "environment" }; // 見つからなければ標準背面指定
+            // カメラ映像の起動と読み取りの開始（かざすだけ状態へ）
+            codeReader.decodeFromVideoDevice(selectedDeviceId, 'video', (result, err) => {
+                if (isProcessing) return;
 
-            Quagga.init({
-                inputStream: {
-                    name: "Live",
-                    type: "LiveStream",
-                    target: document.querySelector('#interactive'),
-                    constraints: constraints
-                },
-                decoder: {
-                    readers: ["code_128_reader", "ean_reader", "code_39_reader"] // 各種1次元バーコード対応
-                },
-                locate: true
-            }, function (err) {
-                if (err) {
-                    showResult("カメラの初期化に失敗しました。標準ブラウザ（Chrome/Safari）で開いているか確認してください。", true);
-                    return;
+                if (result) {
+                    const code = result.getText();
+                    if (code) {
+                        isProcessing = true;
+                        codeReader.reset(); // 連投防止のために一度スキャナを停止
+                        sendPunchData(code);
+                    }
                 }
-                Quagga.start();
+                
+                if (err && !(err instanceof ZXing.NotFoundException)) {
+                    console.error(err);
+                }
             });
 
-        } catch (err) {
-            showResult("カメラの起動権限がありません。ブラウザの設定でカメラを「許可」にしてください。", true);
+        } catch (error) {
+            console.error(error);
+            showResult("カメラ映像の読み込みに失敗しました。ページを再読み込みしてください。", true);
         }
     }
-
-    // バーコードをカメラ映像が捉えた瞬間の自動実行イベント
-    Quagga.onDetected(function (data) {
-        if (isProcessing) return;
-        const code = data.codeResult.code;
-        if (code) {
-            isProcessing = true;
-            Quagga.stop(); // 連投・重複防止のため即座に映像ストップ
-            sendPunchData(code);
-        }
-    });
 
     // GAS APIへ打刻データを自動送信
     async function sendPunchData(employeeCode) {
@@ -130,10 +111,9 @@
         } catch (error) {
             showResult("通信エラーが発生しました。", true);
         } finally {
-            // 打刻完了・またはエラー後、3秒間結果を表示してから自動でカメラを再起動して次の人に備える
+            // 打刻完了後、3秒間結果を表示してから自動で元の「かざすだけ」画面に戻る
             setTimeout(() => {
-                isProcessing = false;
-                initCameraWithDeviceSearch();
+                startScan();
             }, 3000);
         }
     }
@@ -151,8 +131,8 @@
 
     function hideResult() { document.getElementById('result-box').style.display = "none"; }
 
-    // 画面が開いた瞬間に自動起動
-    window.onload = initCameraWithDeviceSearch;
+    // 画面表示と同時にカメラを起動
+    window.onload = startScan;
 </script>
 </body>
 </html>
