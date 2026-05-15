@@ -4,19 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>休憩打刻システム</title>
-    <!-- 世界標準の高速スキャナライブラリ ZXing CDN -->
-    <script type="text/javascript" src="https://unpkg.com"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: sans-serif; }
         body { background: #f0f2f5; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 20px; }
         .container { width: 100%; max-width: 500px; background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
         h1 { font-size: 1.5rem; margin-bottom: 15px; color: #333; }
         
-        /* リアルタイム映像プレビュー領域 */
+        /* 映像表示エリア */
         #video-container { position: relative; width: 100%; height: 300px; background: #000; border-radius: 8px; overflow: hidden; margin-bottom: 15px; }
         #video { width: 100%; height: 100%; object-fit: cover; }
         
-        /* 1次元バーコード用エイム赤線 */
         .laser-line { position: absolute; top: 50%; left: 10%; width: 80%; height: 2px; background: red; box-shadow: 0 0 8px red; z-index: 10; transform: translateY(-50%); animation: blink 1s infinite; }
         @keyframes blink { 50% { opacity: 0.4; } }
 
@@ -33,96 +30,116 @@
     <h1>バーコードかざすだけ打刻</h1>
     
     <div id="video-container">
-        <!-- Androidのフリーズを防ぐため、属性を強力に固定 -->
-        <video id="video" autoplay playsinline muted preload="auto"></video>
+        <!-- 標準規格に厳格に準拠したビデオ要素 -->
+        <video id="video" autoplay playsinline muted></video>
         <div class="laser-line"></div>
     </div>
 
-    <button id="retry-btn" class="btn" style="display:none;" onclick="startScan('standard')">スキャンを再開する</button>
+    <button id="retry-btn" class="btn" style="display:none;" onclick="startNativeScanner()">スキャン再開</button>
     <div id="result-box"></div>
 </div>
 
 <script>
     const GAS_API_URL = "https://script.google.com/macros/s/AKfycbzLB0lat0ynkK-oTwuaZvvlGOXmMl_-XGwZhEP-0QeYs-m3T-l8tbFov9y0Fhhhe14qlg/exec"; 
     
-    let codeReader;
+    let activeStream = null;
+    let scanLoopId = null;
     let isProcessing = false;
+    let barcodeDetector = null;
 
-    // カメラ起動・描画処理（modeによって解像度や指定方法を切り替え）
-    async function startScan(mode = 'standard') {
+    // ブラウザ内蔵の高性能スキャナAPIを準備（外部スクリプトを一切読まない）
+    function checkApiSupport() {
+        if ('BarcodeDetector' in window) {
+            // 主要な1次元バーコード規格を指定
+            barcodeDetector = new BarcodeDetector({ formats: ['code_128', 'ean_13', 'code_39'] });
+            return true;
+        }
+        return false;
+    }
+
+    // カメラの純粋な起動処理
+    async function startNativeScanner() {
         document.getElementById('retry-btn').style.display = 'none';
         hideResult();
         isProcessing = false;
 
-        if (codeReader) { codeReader.reset(); }
-        codeReader = new ZXing.BrowserBarcodeReader();
+        // 過去の動作を完全にリセット
+        stopNativeScanner();
+
+        if (!checkApiSupport()) {
+            showResult("お使いのブラウザ、または端末が標準バーコード認識機能に対応していません。ChromeまたはSafariの最新版にアップデートしてください。", true);
+            return;
+        }
 
         const videoElement = document.getElementById('video');
 
         try {
-            const videoInputDevices = await codeReader.listVideoInputDevices();
-            if (videoInputDevices.length === 0) {
-                showResult("カメラデバイスが見つかりません。", true);
-                return;
-            }
-
-            // 背面カメラの探索
-            let selectedDeviceId = videoInputDevices[0].deviceId;
-            for (const device of videoInputDevices) {
-                const label = device.label.toLowerCase();
-                if (label.includes('back') || label.includes('rear') || label.includes('背面')) {
-                    selectedDeviceId = device.deviceId;
-                    break; 
-                }
-            }
-
-            // 【対策】解像度をあえて低く（640x480）指定してAndroidのフリーズを回避
-            let constraints = {
+            // 端末に背面メインカメラの映像ストリームを要求（これ自体が最も成功率の高い標準記述）
+            const stream = await navigator.mediaDevices.getUserMedia({
                 video: {
-                    deviceId: { exact: selectedDeviceId },
-                    width: { ideal: 640 },
-                    height: { ideal: 480 }
-                }
-            };
-
-            // 予備モード（fallback）の場合は、制約を緩めて端末任せにする
-            if (mode === 'fallback') {
-                constraints = { video: { facingMode: "environment" } };
-            }
-
-            // ZXingにストリームを引き渡して解析開始
-            await codeReader.decodeFromConstraints(constraints, 'video', (result, err) => {
-                if (isProcessing) return;
-                if (result) {
-                    const code = result.getText();
-                    if (code) {
-                        isProcessing = true;
-                        codeReader.reset(); 
-                        sendPunchData(code);
-                    }
+                    facingMode: "environment",
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
                 }
             });
 
-            // 【最重要対策】プログラムが成功判定しているのに描画が遅延・フリーズする現象を、JavaScriptから強制キックして動かす
-            setTimeout(() => {
-                if (videoElement.paused) {
-                    videoElement.play().catch(e => console.log("強制再生エラー:", e));
-                }
-            }, 3000);
+            activeStream = stream;
+            videoElement.srcObject = stream;
+            
+            // 明示的に再生処理を実行
+            await videoElement.play();
 
-            // 【ブラックアウト監視】起動から1.5秒経っても映像が真っ黒（幅や高さの描画が0）なら、別モードで自動リトライ
-            setTimeout(() => {
-                if (videoElement.videoWidth === 0 && mode === 'standard') {
-                    console.log("映像の描画フリーズを検知。予備モードに切り替えます。");
-                    startScan('fallback');
-                }
-            }, 1500);
+            // 映像が動き出したら、内蔵デコーダーによるスキャンループを開始
+            startScanLoop();
 
         } catch (error) {
-            console.error("起動エラー:", error);
-            // 権限エラー等、本物のエラーが出た場合のみメッセージを表示
-            showResult("カメラの接続に失敗しました。ブラウザの設定や権限を確認してください。<br>エラー内容: " + error.message, true);
+            console.error(error);
+            showResult("カメラの起動、または映像の接続に失敗しました。カメラ権限がブラウザに対して『許可』されているか再確認してください。", true);
         }
+    }
+
+    // 映像フレームからバーコードを連続監視する超高速ループ
+    function startScanLoop() {
+        const videoElement = document.getElementById('video');
+
+        async function scan() {
+            if (isProcessing) return;
+
+            // ビdeoの準備ができているか厳格にチェック
+            if (videoElement.readyState === videoElement.HAVE_ENOUGH_DATA) {
+                try {
+                    // ブラウザのネイティブエンジンがメモリ上で直接バーコードを検出
+                    const barcodes = await barcodeDetector.detect(videoElement);
+                    if (barcodes.length > 0 && barcodes[0].rawValue) {
+                        const code = barcodes[0].rawValue;
+                        isProcessing = true;
+                        stopNativeScanner(); // 送信中はカメラとループを完全停止
+                        sendPunchData(code);
+                        return;
+                    }
+                } catch (err) {
+                    console.error("スキャンエラー:", err);
+                }
+            }
+            // 次の描画フレームで再実行（高効率・低負荷なループ）
+            scanLoopId = requestAnimationFrame(scan);
+        }
+        
+        scanLoopId = requestAnimationFrame(scan);
+    }
+
+    // カメラとループを完全にシャットダウンする安全処理
+    function stopNativeScanner() {
+        if (scanLoopId) {
+            cancelAnimationFrame(scanLoopId);
+            scanLoopId = null;
+        }
+        if (activeStream) {
+            activeStream.getTracks().forEach(track => track.stop());
+            activeStream = null;
+        }
+        const videoElement = document.getElementById('video');
+        if (videoElement) { videoElement.srcObject = null; }
     }
 
     // GAS APIへ打刻データを自動送信
@@ -139,8 +156,9 @@
         } catch (error) {
             showResult("通信エラーが発生しました。", true);
         } finally {
+            // 3秒後に自動でカメラとループを再起動して次の人に備える
             setTimeout(() => {
-                startScan('standard');
+                startNativeScanner();
             }, 3000);
         }
     }
@@ -158,7 +176,8 @@
 
     function hideResult() { document.getElementById('result-box').style.display = "none"; }
 
-    window.onload = function() { startScan('standard'); };
+    // 開いた瞬間に即座に実行
+    window.onload = startNativeScanner;
 </script>
 </body>
 </html>
