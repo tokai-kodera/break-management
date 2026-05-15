@@ -15,7 +15,7 @@
         @keyframes blink { 50% { opacity: 0.4; } }
         .btn { display: block; width: 100%; padding: 12px; font-size: 1rem; font-weight: bold; color: white; background: #007bff; border: none; border-radius: 6px; cursor: pointer; margin-top: 10px; }
         
-        /* 🚨 UIアップデート：過去12時間の合計休憩時間を視認しやすく拡張 */
+        /* 💡 UI・通信連動の最終確認用：過去12時間実績の合計時間を極めて見やすく表示するデザイン */
         #result-box { margin-top: 15px; padding: 16px; border-radius: 8px; font-weight: bold; display: none; text-align: left; box-shadow: inset 0 2px 4px rgba(0,0,0,0.05); }
         .success { background: #e2f0d9; color: #385723; border: 1px solid #c5e0b4; }
         .error { background: #fce4d6; color: #c65911; border: 1px solid #f8cbad; }
@@ -24,8 +24,8 @@
         .result-title { font-size: 1.2rem; font-weight: bold; margin-bottom: 8px; border-bottom: 1px solid rgba(0,0,0,0.1); padding-bottom: 4px; }
         .result-item { font-size: 0.95rem; margin: 4px 0; font-weight: normal; }
         .result-item strong { font-weight: bold; color: #000; }
-        .time-badge { display: block; margin-top: 10px; padding: 8px; background: #fff; border-left: 4px solid #007bff; font-size: 1rem; font-weight: bold; }
-        .time-badge span { color: #ffc000; font-size: 1.4rem; float: right; line-height: 1; margin-top: -2px; }
+        .time-badge { display: block; margin-top: 12px; padding: 10px; background: #ffffff; border-left: 5px solid #007bff; border-radius: 0 4px 4px 0; font-size: 1rem; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .time-badge span { color: #d83b01; font-size: 1.5rem; float: right; line-height: 1; margin-top: -2px; font-weight: 800; }
     </style>
 </head>
 <body>
@@ -40,10 +40,20 @@
 </div>
 
 <script>
-    // 💡 堅牢版インラインCODE128デコーダー (ボケ・手ブレ対応)
+    // 💡 複数種別対応・超軽量自己完結デコーダー (CODE39 & CODE128対応版)
     !function(e){"use strict";
-        // CODE128Bのパターンテーブル (バー3本、スペース3本のモジュール幅比率)
-        const PATTERNS = {
+        // CODE39のパターン定義 (太バー=1, 細バー=0)
+        const CODE39_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. *$/+%";
+        const CODE39_PATTERNS = [
+            0x034,0x120,0x030,0x110,0x014,0x104,0x024,0x005,0x101,0x021, // 0-9
+            0x140,0x050,0x150,0x044,0x144,0x054,0x00c,0x10c,0x02c,0x012, // A-J
+            0x112,0x032,0x122,0x042,0x142,0x052,0x003,0x103,0x023,0x00b, // K-T
+            0x10b,0x02b,0x11a,0x02a,0x12a,0x04a,0x009,0x109,0x029,0x006, // U-Z, -, ., space, *
+            0x060,0x068,0x0a0
+        ];
+
+        // CODE128のパターン定義
+        const CODE128_PATTERNS = {
             "212222":0,"222122":1,"222221":2,"121223":3,"121322":4,"131222":5,"122213":6,"122312":7,"132212":8,"221213":9,
             "221312":10,"231212":11,"112232":12,"122132":13,"122231":14,"113222":15,"123122":16,"123221":17,"223211":18,"221132":19,
             "221231":20,"213212":21,"223112":22,"312131":23,"311222":24,"321122":25,"321221":26,"312212":27,"322112":28,"322211":29,
@@ -54,7 +64,7 @@
             "112412":70,"122114":71,"122411":72,"142112":73,"142211":74,"241211":75,"221114":76,"413111":77,"241112":78,"134111":79,
             "111242":80,"121142":81,"121241":82,"114212":83,"124112":84,"124211":85,"411212":86,"421112":87,"421211":88,"212141":89,
             "214121":90,"412121":91,"111143":92,"111341":93,"131141":94,"114113":95,"114311":96,"411113":97,"411311":98,"113141":99,
-            "114131":100,"311141":101,"411131":102,"211412":103,"211214":104,"211232":105 // 103-105 START A,B,C
+            "114131":100,"311141":101,"411131":102,"211412":103,"211214":104,"211232":105
         };
 
         e.decode = function(imageData) {
@@ -62,11 +72,15 @@
             const height = imageData.height;
             const data = imageData.data;
 
-            // 調整ポイント: 手ブレ・傾きに対応するため、中心上下の3ラインを独立走査
-            const targetRows = [Math.floor(height * 0.45), Math.floor(height * 0.50), Math.floor(height * 0.55)];
+            // 💡手ブレ・ピントボケ・傾き対応：垂直方向の5箇所の走査線から複数サンプリング
+            const targetRows = [
+                Math.floor(height * 0.40), Math.floor(height * 0.45),
+                Math.floor(height * 0.50),
+                Math.floor(height * 0.55), Math.floor(height * 0.60)
+            ];
 
             for (let y of targetRows) {
-                // 1. 動的二値化のための輝度抽出とローカル閾値の算出
+                // 1. 動的二値化（ローカルの陰影を相殺）
                 let brightness = new Uint8Array(width);
                 let min = 255, max = 0;
                 for (let x = 0; x < width; x++) {
@@ -77,11 +91,10 @@
                     if (b > max) max = b;
                 }
 
-                // コントラストが低すぎる（バーコードがない）場合は次のラインへ
-                if (max - min < 50) continue;
+                if (max - min < 40) continue; // コントラスト低下時スキップ
                 const threshold = (min + max) / 2;
 
-                // 2. ランレングス（白黒のバーの太さカウント）へ変換
+                // 2. 白黒のエレメント幅（ランレングス）配列へ変換
                 let runs = [];
                 let isBlack = brightness[0] < threshold;
                 let runLength = 1;
@@ -96,56 +109,101 @@
                     }
                 }
                 runs.push(runLength);
+                if (runs.length < 15) continue;
 
-                // 最小本数ガード（CODE128は最低でも開始、1文字、終了、STOPで18エレメント以上必要）
-                if (runs.length < 18) continue;
+                // --- 🌟 【新機能】CODE39 デコード判定ロジック ---
+                const code39Result = tryDecodeCode39(runs);
+                if (code39Result) return code39Result;
 
-                // 3. パターンマッチングとデコード
-                // 先頭のクワイエットゾーン（白い余白）を飛ばすため、最初の黒（インデックス1または2）から走査
-                let startIdx = runs[0] > 20 ? 1 : 0;
-                
-                for (let i = startIdx; i < runs.length - 7; i += 2) {
-                    // CODE128の開始コード(START B = 比率211214)を探す
-                    let charModules = 0;
-                    for(let j=0; j<6; j++) charModules += runs[i+j];
+                // --- 🌟 【新機能】CODE128 デコード判定ロジック ---
+                const code128Result = tryDecodeCode128(runs);
+                if (code128Result) return code128Result;
+            }
+            return null;
+        };
+
+        // CODE39解析アルゴリズム
+        function tryDecodeCode39(runs) {
+            // CODE39は1文字が9個のエレメント(バー5本、スペース4本)で構成される
+            let startIdx = runs[0] > 15 ? 1 : 0;
+            for (let i = startIdx; i < runs.length - 10; i++) {
+                if (i % 2 !== 0) continue; // 必ず黒（バー）から開始させる
+
+                // 9要素の平均的な「細いエレメント」の幅を推測計算
+                let totalW = 0;
+                for (let j = 0; j < 9; j++) totalW += runs[i + j];
+                let avgNarrow = totalW / 12; // 太エレメント3本、細エレメント6本相当のため12等分
+                let thresholdW = avgNarrow * 1.8;
+
+                // 9つのエレメントをビット化（太い=1, 細い=0）
+                let patternBit = 0;
+                for (let j = 0; j < 9; j++) {
+                    patternBit <<= 1;
+                    if (runs[i + j] > thresholdW) patternBit |= 1;
+                }
+
+                // 定義パターンと照合
+                let matchIdx = CODE39_PATTERNS.indexOf(patternBit);
+                if (matchIdx !== -1 && CODE39_CHARS[matchIdx] === '*') { // スタートコード'*'検出
+                    let resultText = "";
+                    let k = i + 10; // 文字間ギャップ(1要素分)を跨いで次へ
                     
-                    let ratioStr = "";
-                    for(let j=0; j<6; j++) ratioStr += Math.round((runs[i+j] / charModules) * 11);
-                    
-                    if (PATTERNS[ratioStr] === 104) { // START B検出成功
-                        let resultText = "";
-                        let k = i + 6;
-                        let checksum = 104;
-                        let charCount = 1;
+                    while (k < runs.length - 8) {
+                        let charW = 0;
+                        for (let j = 0; j < 9; j++) charW += runs[k + j];
+                        let cAvg = charW / 12;
+                        let cThresh = cAvg * 1.8;
 
-                        while (k < runs.length - 4) {
-                            let totalW = 0;
-                            for(let m=0; m<6; m++) totalW += runs[k+m];
-                            
-                            let cRatioStr = "";
-                            for(let m=0; m<6; m++) cRatioStr += Math.round((runs[k+m] / totalW) * 11);
-                            
-                            let val = PATTERNS[cRatioStr];
-                            if (val === undefined) break; // 読み取り不可文字でブレイク
-                            
-                            if (val >= 106) { // STOPコード検出
-                                if (resultText.length > 0) return resultText; // 簡易的に確定
-                                break;
-                            }
-
-                            if (val < 96) {
-                                resultText += String.fromCharCode(val + 32); // CODE128Bの文字変換
-                            }
-                            
-                            checksum += val * charCount;
-                            charCount++;
-                            k += 6;
+                        let cBit = 0;
+                        for (let j = 0; j < 9; j++) {
+                            cBit <<= 1;
+                            if (runs[k + j] > cThresh) cBit |= 1;
                         }
+
+                        let idx = CODE39_PATTERNS.indexOf(cBit);
+                        if (idx === -1) break;
+                        
+                        let char = CODE39_CHARS[idx];
+                        if (char === '*') { // ストップコード'*'検出でデコード確定
+                            if (resultText.length > 0) return resultText;
+                            break;
+                        }
+                        resultText += char;
+                        k += 10; // 次の文字へ移動
                     }
                 }
             }
-            return null; // このフレームでは検出なし
-        };
+            return null;
+        }
+
+        // CODE128解析アルゴリズム
+        function tryDecodeCode128(runs) {
+            let startIdx = runs[0] > 15 ? 1 : 0;
+            for (let i = startIdx; i < runs.length - 7; i += 2) {
+                let charModules = 0;
+                for(let j=0; j<6; j++) charModules += runs[i+j];
+                
+                let ratioStr = "";
+                for(let j=0; j<6; j++) ratioStr += Math.round((runs[i+j] / charModules) * 11);
+                
+                if (CODE128_PATTERNS[ratioStr] === 104) { // START B
+                    let resultText = "";
+                    let k = i + 6;
+                    while (k < runs.length - 4) {
+                        let totalW = 0;
+                        for(let m=0; m<6; m++) totalW += runs[k+m];
+                        let cRatioStr = "";
+                        for(let m=0; m<6; m++) cRatioStr += Math.round((runs[k+m] / totalW) * 11);
+                        let val = CODE128_PATTERNS[cRatioStr];
+                        if (val === undefined) break;
+                        if (val >= 106) { if (resultText.length > 0) return resultText; break; }
+                        if (val < 96) resultText += String.fromCharCode(val + 32);
+                        k += 6;
+                    }
+                }
+            }
+            return null;
+        }
     }(this.BarcodeScanner = {});
 
     const GAS_API_URL = "https://script.google.com/macros/s/AKfycbzLB0lat0ynkK-oTwuaZvvlGOXmMl_-XGwZhEP-0QeYs-m3T-l8tbFov9y0Fhhhe14qlg/exec"; 
@@ -180,7 +238,7 @@
             const stream = await navigator.mediaDevices.getUserMedia({
                 video: {
                     facingMode: "environment",
-                    width: { ideal: 1280 }, // 💡 精度向上のため、HD解像度を要求（軽量ロジックなので耐えられます）
+                    width: { ideal: 1280 }, // 解像度を上げて線幅の判別精度を大幅向上
                     height: { ideal: 720 }
                 }
             });
@@ -190,7 +248,7 @@
             startInternalLoop();
         } catch (err) {
             console.error(err);
-            showResult("<div class='result-title'>カメラ起動エラー</div><div class='result-item'>iPhoneの『設定』＞『Safari』＞『カメラ』のアクセス権が許可されているか確認してください。</div>", true);
+            showResult("<div class='result-title'>カメラ起動エラー</div><div class='result-item'>カメラへのアクセス権限が拒否されている可能性があります。</div>", true);
         }
     }
 
@@ -202,7 +260,6 @@
         function tick() {
             if (isProcessing) return;
             if (video && video.readyState === video.HAVE_ENOUGH_DATA) {
-                // 解析用のCanvas解像度を確保
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -217,7 +274,7 @@
                     return;
                 }
             }
-            scanTimer = setTimeout(tick, 100); // 100ms間隔で高速スキャン
+            scanTimer = setTimeout(tick, 80); // レスポンス速度向上のため80ms間隔に縮小
         }
         tick();
     }
@@ -232,14 +289,14 @@
         if (video) { video.srcObject = null; video.remove(); }
     }
 
-    // 💡 連携通信の完全修正（CORS通信を受け取り、実績時間をUI反映する）
+    // 💡フロントエンドUI・通信連動の最終実装（12時間実績のバッジ表示）
     async function sendPunchData(employeeCode) {
         showLoading(`データ照合中...<br>[コード: ${employeeCode}]`);
         try {
-            // 🚨 CORSを安全に通過させレスポンスを得るため、URLSearchParamsを使用したPOSTにシリアライズ
+            // 安全なCORS連携通信
             const response = await fetch(GAS_API_URL, {
                 method: "POST",
-                mode: "cors", // no-cors から cors へ修正！
+                mode: "cors",
                 headers: { "Content-Type": "application/x-www-form-urlencoded" },
                 body: new URLSearchParams({ employeeCode: employeeCode })
             });
@@ -248,11 +305,13 @@
             
             if (data.success) {
                 const statusTitle = data.action === "break_start" ? "🟢 休憩開始を記録しました" : "🔴 休憩終了を記録しました";
+                
+                // 💡 【機能復元】GASから返ってきた過去12時間実績（totalBreakTime）を大きく明示
                 const html = `
                     <div class="result-title">${statusTitle}</div>
-                    <div class="result-item">社員氏名: <strong>${data.employeeName}</strong></div>
+                    <div class="result-item">従業員名: <strong>${data.employeeName}</strong></div>
                     <div class="result-item">社員コード: <strong>${employeeCode}</strong></div>
-                    <div class="time-badge">過去12時間の合計休憩時間 <span>${data.totalBreakTime} 分</span></div>
+                    <div class="time-badge">過去12時間の合計休憩時間 <span>${data.totalBreakTime || 0} 分</span></div>
                 `;
                 showResult(html, false);
             } else {
@@ -260,9 +319,9 @@
             }
         } catch (error) {
             console.error(error);
-            showResult("<div class='result-title'>通信エラー</div><div class='result-item'>サーバーとの通信に失敗しました。ネット環境を確認してください。</div>", true);
+            showResult("<div class='result-title'>通信エラー</div><div class='result-item'>サーバーからのデータ受信に失敗しました。</div>", true);
         } finally {
-            // 4秒後に自動で次のスキャンへ移行
+            // 4秒後に画面を戻し、自動でスキャンをリスタート
             setTimeout(() => { startCamera(); }, 4000);
         }
     }
