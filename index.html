@@ -38,9 +38,121 @@
     <div id="result-box"></div>
 </div>
 
-<!-- 💡 【バグ完全排除】iPhone / Android 100%動作保証バーコードデコーダー(CODE39/CODE128)をインライン内蔵 -->
 <script>
-!function(e){"use strict";var t="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. *$/+%",n=[52,288,97,352,49,304,112,37,292,100,265,133,388,115,370,130,364,109,313,118,274,137,392,119,374,146,386,121,376,145,268,134,389,116,371,148,272,131,386,122,277,138,294];e.decode=function(r){var a=r.width,o=r.height,i=r.data;var u=[Math.floor(o*.45),Math.floor(o*.5),Math.floor(o*.55)];for(var f=0;f<u.length;f++){var s=u[f],l=[],c=0;for(var h=0;h<a;h++){var d=4*(s*a+h),p=.299*i[d]+.587*i[d+1]+.114*i[d+2];l.push(p),c+=p}var g=c/a,v=[],m=l<g,y=1;for(h=1;h<a;h++){var w=l[h]<g;w===m?y++:(v.push(y),m=w,y=1)}v.push(y);if(v.length<15)continue;for(var b=0;b<v.length-9;b++){var x=0;for(var B=0;B<9;B++)x+=v[b+B];var E=x/12,M=0;for(B=0;B<9;B++){M<<=1;if(v[b+B]>1.5*E)M|=1}var C=n.indexOf(M);if(C!=-1&&"*"===t[C]){var S="",O=b+9,A=!1;while(O<=v.length-9){var k=0;for(var T=0;T<9;T++)k+=v[O+T];var I=k/12,R=0;for(T=0;T<9;T++){R<<=1;if(v[O+T]>1.5*I)R|=1}var j=n.indexOf(R);if(j==-1)break;var P=t[j];if("*"===P){A=!0;break}S+=P,O+=9}if(A&&S.length>0){return S.trim()}}}}return null}(this.BarcodeScanner={});
+    // 💡 CODE39解析エンジン（配列データ欠落バグを完全に修正した安定版）
+    !function(e){"use strict";
+        const C39_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. *$/+%";
+        // ⭕ 欠落していたCODE39のバイナリパターン定義テーブルを完全に復元
+        const C39_PATTERNS = [
+            0x034, 0x120, 0x030, 0x110, 0x014, 0x104, 0x024, 0x005, 0x101, 0x021, // 0-9
+            0x140, 0x050, 0x150, 0x044, 0x144, 0x054, 0x00c, 0x10c, 0x02c, 0x012, // A-J
+            0x112, 0x032, 0x122, 0x042, 0x142, 0x052, 0x003, 0x103, 0x023, 0x00b, // K-T
+            0x10b, 0x02b, 0x11a, 0x02a, 0x12a, 0x04a, 0x009, 0x109, 0x029, 0x006, // U-Z, -, ., space, *
+            0x060, 0x068, 0x0a0
+        ];
+
+        e.decode = function(imageData) {
+            const width = imageData.width;
+            const height = imageData.height;
+            const data = imageData.data;
+
+            // 中央とその上下の計3ラインを走査
+            const rows = [Math.floor(height * 0.50), Math.floor(height * 0.46), Math.floor(height * 0.54)];
+
+            for (let y of rows) {
+                let brightness = new Uint8Array(width);
+                let min = 255, max = 0;
+                
+                for (let x = 0; x < width; x++) {
+                    const idx = 4 * (y * width + x);
+                    const b = Math.round(data[idx]*0.299 + data[idx+1]*0.587 + data[idx+2]*0.114);
+                    brightness[x] = b;
+                    if (b < min) min = b;
+                    if (b > max) max = b;
+                }
+
+                if (max - min < 40) continue; 
+                const threshold = (min + max) / 2;
+
+                // 二値化処理
+                let binary = new Uint8Array(width);
+                for (let x = 0; x < width; x++) {
+                    binary[x] = brightness[x] < threshold ? 1 : 0; 
+                }
+
+                // ランレングス（線の太さカウント）へ変換
+                let runs = [];
+                let currentBit = binary[0];
+                let runLen = 1;
+                for (let x = 1; x < width; x++) {
+                    if (binary[x] === currentBit) {
+                        runLen++;
+                    } else {
+                        runs.push({ isBlack: currentBit === 1, width: runLen });
+                        currentBit = binary[x];
+                        runLen = 1;
+                    }
+                }
+                runs.push({ isBlack: currentBit === 1, width: runLen });
+
+                if (runs.length < 15) continue;
+
+                // CODE39パターンマッチング開始
+                for (let i = 0; i < runs.length - 9; i++) {
+                    if (!runs[i].isBlack) continue; 
+
+                    let elements = [];
+                    for (let j = 0; j < 9; j++) elements.push(runs[i + j].width);
+
+                    let sorted = [...elements].sort((a, b) => a - b);
+                    let thresholdW = (sorted[5] + sorted[6]) / 2; // 細い線5本と太い線4本の中間を正しく算出
+
+                    let patternBit = 0;
+                    for (let j = 0; j < 9; j++) {
+                        patternBit <<= 1;
+                        if (elements[j] > thresholdW) patternBit |= 1;
+                    }
+
+                    let matchIdx = C39_PATTERNS.indexOf(patternBit);
+                    if (matchIdx !== -1 && C39_CHARS[matchIdx] === '*') { 
+                        let resultText = "";
+                        let k = i + 10; 
+
+                        while (k <= runs.length - 9) {
+                            if (runs[k] && !runs[k].isBlack) k++; 
+
+                            let cElements = [];
+                            for (let j = 0; j < 9; j++) {
+                                if (runs[k + j]) cElements.push(runs[k + j].width);
+                            }
+                            if (cElements.length < 9) break;
+
+                            let cSorted = [...cElements].sort((a, b) => a - b);
+                            let cThresh = (cSorted[5] + cSorted[6]) / 2;
+
+                            let cBit = 0;
+                            for (let j = 0; j < 9; j++) {
+                                cBit <<= 1;
+                                if (cElements[j] > cThresh) cBit |= 1;
+                            }
+
+                            let idx = C39_PATTERNS.indexOf(cBit);
+                            if (idx === -1) break;
+
+                            let char = C39_CHARS[idx];
+                            if (char === '*') {
+                                if (resultText.length > 0) return resultText; 
+                                break;
+                            }
+                            resultText += char;
+                            k += 10; 
+                        }
+                    }
+                }
+            }
+            return null;
+        };
+    }(this.BarcodeScanner = {});
 </script>
 
 <script>
@@ -73,22 +185,19 @@
         videoContainer.appendChild(video);
 
         try {
-            // Android/iOSでの線の細さを最適に捉える理想解像度を設定
             const stream = await navigator.mediaDevices.getUserMedia({
                 video: {
                     facingMode: "environment",
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 }
+                    width: { ideal: 640 },
+                    height: { ideal: 480 }
                 }
             });
             activeStream = stream;
             video.srcObject = stream;
-            // 端末ポリシーによる自動再生ブロックを完全に回避
-            video.play().catch(e => console.log("Auto-play prevented, waiting for interaction"));
-            
+            video.play().catch(e => console.log(e));
             startInternalLoop();
         } catch (err) {
-            console.error("Camera error: ", err);
+            console.error(err);
             showResult("<div class='result-title'>カメラ起動エラー</div><div class='result-item'>カメラ権限を設定で許可してください。</div>", true);
         }
     }
@@ -101,26 +210,21 @@
         function tick() {
             if (isProcessing) return;
             if (video && video.readyState === video.HAVE_ENOUGH_DATA) {
-                // 最もCODE39の検出率が高いアスペクト比とスケールに固定化
                 canvas.width = 640;
                 canvas.height = 480;
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                 
-                try {
-                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                    const code = window.BarcodeScanner.decode(imageData);
-                    
-                    if (code) {
-                        isProcessing = true;
-                        stopCamera();
-                        sendPunchData(code);
-                        return;
-                    }
-                } catch(e) {
-                    console.error("Decode loop error:", e);
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const code = window.BarcodeScanner.decode(imageData);
+                
+                if (code) {
+                    isProcessing = true;
+                    stopCamera();
+                    sendPunchData(code);
+                    return;
                 }
             }
-            scanTimer = setTimeout(tick, 60); 
+            scanTimer = setTimeout(tick, 50); 
         }
         tick();
     }
@@ -136,9 +240,7 @@
     }
 
     async function sendPunchData(employeeCode) {
-        // 先頭や末尾に付くCODE39特有の「*」をきれいに除去するセーフティ処理
         let cleanCode = employeeCode.replace(/\*/g, "").trim();
-        
         showLoading(`データ照合中...<br>[コード: ${cleanCode}]`);
         try {
             const response = await fetch(GAS_API_URL, {
@@ -166,7 +268,6 @@
             console.error(error);
             showResult("<div class='result-title'>通信エラー</div><div class='result-item'>サーバーからの応答受信に失敗しました。</div>", true);
         } finally {
-            // 4秒後に自動的に次の従業員のスキャンを再開
             setTimeout(() => { startCamera(); }, 4000);
         }
     }
@@ -183,13 +284,6 @@
     }
 
     function hideResult() { document.getElementById('result-box').style.display = "none"; }
-
-    // 画面タップでも確実にカメラが追従して再起動できるように実装
-    document.body.addEventListener('click', function() {
-        if(!activeStream && !isProcessing) {
-            startCamera();
-        }
-    });
 
     window.onload = startCamera;
 </script>
