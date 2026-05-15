@@ -10,7 +10,6 @@
         .container { width: 100%; max-width: 500px; background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
         h1 { font-size: 1.5rem; margin-bottom: 15px; color: #333; }
         
-        /* 映像表示エリア */
         #video-container { position: relative; width: 100%; height: 300px; background: #000; border-radius: 8px; overflow: hidden; margin-bottom: 15px; }
         #video { width: 100%; height: 100%; object-fit: cover; }
         
@@ -30,12 +29,11 @@
     <h1>バーコードかざすだけ打刻</h1>
     
     <div id="video-container">
-        <!-- 標準規格に厳格に準拠したビデオ要素 -->
         <video id="video" autoplay playsinline muted></video>
         <div class="laser-line"></div>
     </div>
 
-    <button id="retry-btn" class="btn" style="display:none;" onclick="startNativeScanner()">スキャン再開</button>
+    <button id="retry-btn" class="btn" style="display:none;" onclick="startEngine()">スキャン再開</button>
     <div id="result-box"></div>
 </div>
 
@@ -45,95 +43,110 @@
     let activeStream = null;
     let scanLoopId = null;
     let isProcessing = false;
+    let isNativeSupported = false;
     let barcodeDetector = null;
+    let zxingReader = null;
 
-    // ブラウザ内蔵の高性能スキャナAPIを準備（外部スクリプトを一切読まない）
-    function checkApiSupport() {
-        if ('BarcodeDetector' in window) {
-            // 主要な1次元バーコード規格を指定
-            barcodeDetector = new BarcodeDetector({ formats: ['code_128', 'ean_13', 'code_39'] });
-            return true;
-        }
-        return false;
-    }
-
-    // カメラの純粋な起動処理
-    async function startNativeScanner() {
+    // 起動エンジンの選定（AndroidかiPhoneかを自動判別）
+    async function startEngine() {
         document.getElementById('retry-btn').style.display = 'none';
         hideResult();
         isProcessing = false;
+        stopScanner();
 
-        // 過去の動作を完全にリセット
-        stopNativeScanner();
-
-        if (!checkApiSupport()) {
-            showResult("お使いのブラウザ、または端末が標準バーコード認識機能に対応していません。ChromeまたはSafariの最新版にアップデートしてください。", true);
-            return;
+        // 1. Androidなどで標準機能(BarcodeDetector)が動くかチェック
+        if ('BarcodeDetector' in window) {
+            try {
+                barcodeDetector = new BarcodeDetector({ formats: ['code_128', 'ean_13', 'code_39'] });
+                isNativeSupported = true;
+                initCamera('native'); // Android用ネイティブモードで起動
+                return;
+            } catch(e) { isNativeSupported = false; }
         }
 
+        // 2. iPhoneなどの場合、バックアップ用のZXingライブラリをその場で動的に読み込む
+        showLoading("iOS互換モードを起動中...");
+        if (!window.ZXing) {
+            await new Promise((resolve) => {
+                const script = document.createElement('script');
+                script.src = "https://unpkg.com";
+                script.onload = resolve;
+                document.head.appendChild(script);
+            });
+        }
+        initCamera('zxing'); // iPhone用互換モードで起動
+    }
+
+    // カメラストリームの取得と再生
+    async function initCamera(mode) {
+        hideResult();
         const videoElement = document.getElementById('video');
 
         try {
-            // 端末に背面メインカメラの映像ストリームを要求（これ自体が最も成功率の高い標準記述）
+            // 最も成功率の高い背面カメラ指定
             const stream = await navigator.mediaDevices.getUserMedia({
-                video: {
-                    facingMode: "environment",
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 }
-                }
+                video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
             });
 
             activeStream = stream;
             videoElement.srcObject = stream;
-            
-            // 明示的に再生処理を実行
             await videoElement.play();
 
-            // 映像が動き出したら、内蔵デコーダーによるスキャンループを開始
-            startScanLoop();
+            if (mode === 'native') {
+                // Android用の高速ループ開始
+                startNativeLoop();
+            } else {
+                // iPhone用のZXing処理開始
+                startZXingLoop();
+            }
 
         } catch (error) {
             console.error(error);
-            showResult("カメラの起動、または映像の接続に失敗しました。カメラ権限がブラウザに対して『許可』されているか再確認してください。", true);
+            showResult("カメラの起動に失敗しました。SafariやChromeの設定でカメラ権限を『許可』にしてください。", true);
         }
     }
 
-    // 映像フレームからバーコードを連続監視する超高速ループ
-    function startScanLoop() {
+    // 【Android用】内蔵エンジンによる高速処理ループ
+    function startNativeLoop() {
         const videoElement = document.getElementById('video');
-
         async function scan() {
             if (isProcessing) return;
-
-            // ビdeoの準備ができているか厳格にチェック
             if (videoElement.readyState === videoElement.HAVE_ENOUGH_DATA) {
                 try {
-                    // ブラウザのネイティブエンジンがメモリ上で直接バーコードを検出
                     const barcodes = await barcodeDetector.detect(videoElement);
                     if (barcodes.length > 0 && barcodes[0].rawValue) {
-                        const code = barcodes[0].rawValue;
                         isProcessing = true;
-                        stopNativeScanner(); // 送信中はカメラとループを完全停止
-                        sendPunchData(code);
+                        stopScanner();
+                        sendPunchData(barcodes[0].rawValue);
                         return;
                     }
-                } catch (err) {
-                    console.error("スキャンエラー:", err);
-                }
+                } catch (err) {}
             }
-            // 次の描画フレームで再実行（高効率・低負荷なループ）
             scanLoopId = requestAnimationFrame(scan);
         }
-        
         scanLoopId = requestAnimationFrame(scan);
     }
 
-    // カメラとループを完全にシャットダウンする安全処理
-    function stopNativeScanner() {
-        if (scanLoopId) {
-            cancelAnimationFrame(scanLoopId);
-            scanLoopId = null;
-        }
+    // 【iPhone用】ZXingによる処理ループ
+    function startZXingLoop() {
+        zxingReader = new ZXing.BrowserBarcodeReader();
+        zxingReader.decodeFromVideoElement(document.getElementById('video'), (result, err) => {
+            if (isProcessing) return;
+            if (result) {
+                const code = result.getText();
+                if (code) {
+                    isProcessing = true;
+                    stopScanner();
+                    sendPunchData(code);
+                }
+            }
+        });
+    }
+
+    // スキャナーとストリームの完全停止処理
+    function stopScanner() {
+        if (scanLoopId) { cancelAnimationFrame(scanLoopId); scanLoopId = null; }
+        if (zxingReader) { zxingReader.reset(); zxingReader = null; }
         if (activeStream) {
             activeStream.getTracks().forEach(track => track.stop());
             activeStream = null;
@@ -142,7 +155,7 @@
         if (videoElement) { videoElement.srcObject = null; }
     }
 
-    // GAS APIへ打刻データを自動送信
+    // GAS APIへの自動打刻送信
     async function sendPunchData(employeeCode) {
         showLoading(`送信中... [コード: ${employeeCode}]`);
         try {
@@ -156,9 +169,9 @@
         } catch (error) {
             showResult("通信エラーが発生しました。", true);
         } finally {
-            // 3秒後に自動でカメラとループを再起動して次の人に備える
+            // 3秒後に自動でカメラを再起動して次の人に備える
             setTimeout(() => {
-                startNativeScanner();
+                startEngine();
             }, 3000);
         }
     }
@@ -176,8 +189,7 @@
 
     function hideResult() { document.getElementById('result-box').style.display = "none"; }
 
-    // 開いた瞬間に即座に実行
-    window.onload = startNativeScanner;
+    window.onload = startEngine;
 </script>
 </body>
 </html>
