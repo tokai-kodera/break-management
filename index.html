@@ -32,68 +32,96 @@
 <div class="container">
     <h1>バーコードかざすだけ打刻</h1>
     
-    <!-- Androidで確実に映像が映るビデオ要素 -->
     <div id="video-container">
-        <video id="video" autoplay playsinline muted></video>
+        <!-- Androidのフリーズを防ぐため、属性を強力に固定 -->
+        <video id="video" autoplay playsinline muted preload="auto"></video>
         <div class="laser-line"></div>
     </div>
 
-    <button id="retry-btn" class="btn" style="display:none;" onclick="startScan()">スキャンを再開する</button>
+    <button id="retry-btn" class="btn" style="display:none;" onclick="startScan('standard')">スキャンを再開する</button>
     <div id="result-box"></div>
 </div>
 
 <script>
-    // 🔗 指定いただいたGASウェブアプリURLをセット済みです
     const GAS_API_URL = "https://script.google.com/macros/s/AKfycbzLB0lat0ynkK-oTwuaZvvlGOXmMl_-XGwZhEP-0QeYs-m3T-l8tbFov9y0Fhhhe14qlg/exec"; 
     
     let codeReader;
     let isProcessing = false;
 
-    // ZXingによる背面カメラ強制起動とバーコード連続スキャン処理
-    async function startScan() {
+    // カメラ起動・描画処理（modeによって解像度や指定方法を切り替え）
+    async function startScan(mode = 'standard') {
         document.getElementById('retry-btn').style.display = 'none';
         hideResult();
         isProcessing = false;
 
-        // 過去のインスタンスがあれば破棄して初期化
         if (codeReader) { codeReader.reset(); }
         codeReader = new ZXing.BrowserBarcodeReader();
 
+        const videoElement = document.getElementById('video');
+
         try {
-            // 端末のすべてのカメラを取得
             const videoInputDevices = await codeReader.listVideoInputDevices();
-            
-            // 背面カメラ（環境用カメラ）を優先的に選択
+            if (videoInputDevices.length === 0) {
+                showResult("カメラデバイスが見つかりません。", true);
+                return;
+            }
+
+            // 背面カメラの探索
             let selectedDeviceId = videoInputDevices[0].deviceId;
             for (const device of videoInputDevices) {
                 const label = device.label.toLowerCase();
-                if (label.includes('back') || label.includes('rear') || label.includes('背面') || label.includes('環境')) {
+                if (label.includes('back') || label.includes('rear') || label.includes('背面')) {
                     selectedDeviceId = device.deviceId;
                     break; 
                 }
             }
 
-            // カメラ映像の起動と読み取りの開始（かざすだけ状態へ）
-            codeReader.decodeFromVideoDevice(selectedDeviceId, 'video', (result, err) => {
-                if (isProcessing) return;
+            // 【対策】解像度をあえて低く（640x480）指定してAndroidのフリーズを回避
+            let constraints = {
+                video: {
+                    deviceId: { exact: selectedDeviceId },
+                    width: { ideal: 640 },
+                    height: { ideal: 480 }
+                }
+            };
 
+            // 予備モード（fallback）の場合は、制約を緩めて端末任せにする
+            if (mode === 'fallback') {
+                constraints = { video: { facingMode: "environment" } };
+            }
+
+            // ZXingにストリームを引き渡して解析開始
+            await codeReader.decodeFromConstraints(constraints, 'video', (result, err) => {
+                if (isProcessing) return;
                 if (result) {
                     const code = result.getText();
                     if (code) {
                         isProcessing = true;
-                        codeReader.reset(); // 連投防止のために一度スキャナを停止
+                        codeReader.reset(); 
                         sendPunchData(code);
                     }
                 }
-                
-                if (err && !(err instanceof ZXing.NotFoundException)) {
-                    console.error(err);
-                }
             });
 
+            // 【最重要対策】プログラムが成功判定しているのに描画が遅延・フリーズする現象を、JavaScriptから強制キックして動かす
+            setTimeout(() => {
+                if (videoElement.paused) {
+                    videoElement.play().catch(e => console.log("強制再生エラー:", e));
+                }
+            }, 3000);
+
+            // 【ブラックアウト監視】起動から1.5秒経っても映像が真っ黒（幅や高さの描画が0）なら、別モードで自動リトライ
+            setTimeout(() => {
+                if (videoElement.videoWidth === 0 && mode === 'standard') {
+                    console.log("映像の描画フリーズを検知。予備モードに切り替えます。");
+                    startScan('fallback');
+                }
+            }, 1500);
+
         } catch (error) {
-            console.error(error);
-            showResult("カメラ映像の読み込みに失敗しました。ページを再読み込みしてください。", true);
+            console.error("起動エラー:", error);
+            // 権限エラー等、本物のエラーが出た場合のみメッセージを表示
+            showResult("カメラの接続に失敗しました。ブラウザの設定や権限を確認してください。<br>エラー内容: " + error.message, true);
         }
     }
 
@@ -111,9 +139,8 @@
         } catch (error) {
             showResult("通信エラーが発生しました。", true);
         } finally {
-            // 打刻完了後、3秒間結果を表示してから自動で元の「かざすだけ」画面に戻る
             setTimeout(() => {
-                startScan();
+                startScan('standard');
             }, 3000);
         }
     }
@@ -131,8 +158,7 @@
 
     function hideResult() { document.getElementById('result-box').style.display = "none"; }
 
-    // 画面表示と同時にカメラを起動
-    window.onload = startScan;
+    window.onload = function() { startScan('standard'); };
 </script>
 </body>
 </html>
