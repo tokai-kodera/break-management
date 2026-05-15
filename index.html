@@ -9,18 +9,12 @@
         body { background: #f0f2f5; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 20px; }
         .container { width: 100%; max-width: 500px; background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
         h1 { font-size: 1.5rem; margin-bottom: 15px; color: #333; }
-        
-        /* 💡 画像認識エンジンのためのビューポート定義 */
         #interactive { position: relative; width: 100%; height: 300px; background: #000; border-radius: 8px; overflow: hidden; margin-bottom: 15px; }
         #interactive video { width: 100%; height: 100%; object-fit: cover; }
-        
-        /* 中央のスキャンマーク（レーザー線） */
         .laser-line { position: absolute; top: 50%; left: 10%; width: 80%; height: 2px; background: #00ff00; box-shadow: 0 0 8px #00ff00; z-index: 10; transform: translateY(-50%); animation: blink 1s infinite; }
         @keyframes blink { 50% { opacity: 0.4; } }
-        
         .btn { display: block; width: 100%; padding: 12px; font-size: 1rem; font-weight: bold; color: white; background: #007bff; border: none; border-radius: 6px; cursor: pointer; margin-top: 10px; }
         
-        /* UI・通信連動：過去12時間の実績時間を一目で現場作業員が確認できるデザイン */
         #result-box { margin-top: 15px; padding: 16px; border-radius: 8px; font-weight: bold; display: none; text-align: left; box-shadow: inset 0 2px 4px rgba(0,0,0,0.05); }
         .success { background: #e2f0d9; color: #385723; border: 1px solid #c5e0b4; }
         .error { background: #fce4d6; color: #c65911; border: 1px solid #f8cbad; }
@@ -44,22 +38,27 @@
     <div id="result-box"></div>
 </div>
 
-<!-- 💡 【CSP完全突破】世界最高峰の画像高速認識エンジン（Html5Qrcode派生）を外部通信ゼロのインラインコードとして直接埋め込み -->
-<script>
-    !function(e){"use strict";var t="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. *$/+%",n=[52,288,97,352,49,304,112,37,292,100,265,133,388,115,370,130,364,109,313,118,274,137,392,119,374,146,386,121,376,145,268,134,389,116,371,148,272,131,386,122,277,138,294];e.decode=function(r){var a=r.width,o=r.height,i=r.data;var u=[Math.floor(o*.42),Math.floor(o*.46),Math.floor(o*.5),Math.floor(o*.54),Math.floor(o*.58)];for(var f=0;f<u.length;f++){var s=u[f],l=[],c=0;for(var h=0;h<a;h++){var d=4*(s*a+h),p=.299*i[d]+.587*i[d+1]+.114*i[d+2];l.push(p),c+=p}var g=c/a,v=[],m=l<g,y=1;for(h=1;h<a;h++){var w=l[h]<g;w===m?y++:(v.push({isBlack:m,width:y}),m=w,y=1)}v.push({isBlack:m,width:y});if(v.length<15)continue;for(var b=0;b<v.length-9;b++){if(v[b].isBlack){var x=[];for(var B=0;B<9;B++)x.push(v[b+B].width);var E=[...x].sort(function(e,t){return e-t}),M=(E[4]+E[5])/2,C=0;for(B=0;B<9;B++)C<<=1,x[B]>M&&(C|=1);var S=n.indexOf(C);if(S!=-1&&"*"===t[S]){var O="",I=b+9,A=!1;while(I<=v.length-9){v[I]&&!v[I].isBlack&&v[I].width>3*M&&(I++);var k=[];for(var B=0;B<9;B++)v[I+B]&&k.push(v[I+B].width);if(k.length<9)break;var T=[...k].sort(function(e,t){return e-t}),U=(T[4]+T[5])/2,R=0;for(B=0;B<9;B++)R<<=1,k[B]>U&&(R|=1);var j=n.indexOf(R);if(j==-1)break;var P=t[j];if("*"===P){A=!0;break}O+=P,I+=9}if(A&&O.length>0)return O.trim()}}}}return null}(this.BarcodeScanner={});
-</script>
-
 <script>
     const GAS_API_URL = "https://script.google.com/macros/s/AKfycbzLB0lat0ynkK-oTwuaZvvlGOXmMl_-XGwZhEP-0QeYs-m3T-l8tbFov9y0Fhhhe14qlg/exec"; 
     let activeStream = null;
     let isProcessing = false;
     let scanTimer = null;
+    let detector = null;
 
     async function startScanner() {
         document.getElementById('retry-btn').style.display = 'none';
         hideResult();
         isProcessing = false;
         stopCamera();
+
+        // 💡 iOS/Android内蔵の超高精度AIバーコード読み取りAPIをセットアップ
+        if ('BarcodeDetector' in window) {
+            detector = new BarcodeDetector({ formats: ['code_39', 'code_128', 'qr'] });
+        } else {
+            // 万が一内蔵APIが古い端末で使えない場合のフォールバック通知
+            alert("お使いのブラウザ、またはiOS/Androidのバージョンが古いため、内蔵スキャナーがサポートされていません。OSのアップデートを行ってください。");
+            return;
+        }
 
         const videoContainer = document.getElementById('interactive');
         const oldVideo = videoContainer.querySelector('video');
@@ -73,57 +72,46 @@
         videoContainer.appendChild(video);
 
         try {
-            // 💡 QRコード読み取り方式と同様、環境側の広角・マクロカメラ（environment）をフルパワーで起動
+            // 画像認識に最も適したカメラ解像度を要求
             const stream = await navigator.mediaDevices.getUserMedia({
-                video: {
-                    facingMode: "environment",
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 }
-                }
+                video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
             });
             activeStream = stream;
             video.srcObject = stream;
             await video.play();
             
-            // 高速マトリクス画像解析ループを開始
+            // 爆速マトリクス認識ループをスタート
             startCaptureLoop();
         } catch (err) {
             console.error(err);
-            showResult("<div class='result-title'>カメラ起動エラー</div><div class='result-item'>Safari / Chrome のブラウザ設定でカメラの使用を許可してください。</div>", true);
+            showResult("<div class='result-title'>カメラ起動エラー</div><div class='result-item'>ブラウザ設定でカメラの許可を有効にしてください。</div>", true);
         }
     }
 
-    // 💡 QRコードスキャナーと同様に、ビデオ映像からフレーム画像を高速で切り出して抽出するコアロジック
     function startCaptureLoop() {
         const video = document.querySelector('#interactive video');
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
 
-        function captureFrame() {
+        async function captureFrame() {
             if (isProcessing) return;
             if (video && video.readyState === video.HAVE_ENOUGH_DATA) {
-                // 機種ごとの歪みを吸収する最適な画像マトリクスサイズ（640x480）へ高速転写
-                canvas.width = 640;
-                canvas.height = 480;
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                
                 try {
-                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    // 💡 QRコードスキャナーと全く同じ方式：ビデオの「生の1コマ」を直接AIエンジンに投入
+                    const barcodes = await detector.detect(video);
                     
-                    // 完全埋め込み型の高速画像デコーダーにマトリクスデータを投入
-                    const detectedCode = window.BarcodeScanner.decode(imageData);
-                    
-                    if (detectedCode && detectedCode.length >= 2) {
-                        isProcessing = true;
-                        stopCamera();
-                        sendPunchData(detectedCode); // 発見したら即時送信
-                        return;
+                    if (barcodes.length > 0) {
+                        const code = barcodes[0].rawValue;
+                        if (code && code.trim().length >= 2) {
+                            isProcessing = true;
+                            stopCamera();
+                            sendPunchData(code.trim()); // 検出したら即時送信
+                            return;
+                        }
                     }
                 } catch(e) {
-                    console.error("解析ループエラー:", e);
+                    console.error("AI解析エラー:", e);
                 }
             }
-            // 💡 QRコードスキャナーと同じ、人間の目に留まらない超高速間隔（35ミリ秒ごと）で画像をスキャン
+            // 35ミリ秒ごとにスマホチップのパワーで爆速画像スキャン
             scanTimer = setTimeout(captureFrame, 35); 
         }
         captureFrame();
@@ -140,14 +128,17 @@
     }
 
     async function sendPunchData(employeeCode) {
-        showLoading(`データ照合中...<br>[コード: ${employeeCode}]`);
+        // CODE39特有の両端のアスタリスク「*」は、GAS連携のためにここで自動カット
+        let cleanCode = employeeCode.replace(/\*/g, "").trim();
+        
+        showLoading(`データ照合中...<br>[コード: ${cleanCode}]`);
         try {
-            // 安全なCORSによる片道・双方向の完全開通 fetch 通信
+            // 完全独立開通したCORS通信
             const response = await fetch(GAS_API_URL, {
                 method: "POST",
                 mode: "cors",
                 headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: new URLSearchParams({ employeeCode: employeeCode })
+                body: new URLSearchParams({ employeeCode: cleanCode })
             });
             const data = await response.json();
             
@@ -156,8 +147,8 @@
                 const html = `
                     <div class="result-title">${statusTitle}</div>
                     <div class="result-item">従業員名: <strong>${data.employeeName}</strong></div>
-                    <div class="result-item">社員コード: <strong>${employeeCode}</strong></div>
-                    <!-- 💡 【引き継ぎ仕様の復元】GASからの合計休憩時間をUIへ美しく表示 -->
+                    <div class="result-item">社員コード: <strong>${cleanCode}</strong></div>
+                    <!-- 💡 【機能復元】GASからの合計時間をUI側へ美しく表示 -->
                     <div class="time-badge">過去12時間の合計休憩時間 <span>${data.totalBreakTime || 0} 分</span></div>
                 `;
                 showResult(html, false);
@@ -168,7 +159,7 @@
             console.error(error);
             showResult("<div class='result-title'>通信エラー</div><div class='result-item'>サーバーからの応答受信に失敗しました。</div>", true);
         } finally {
-            // 4秒後に自動でスキャン画面に戻り、次の従業員の読み取りを待機
+            // 4秒後に自動でスキャン画面に戻り、次の打刻のためにリスタート
             setTimeout(() => { startScanner(); }, 4000);
         }
     }
