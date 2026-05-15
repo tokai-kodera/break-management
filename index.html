@@ -4,62 +4,118 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>休憩打刻システム</title>
-    <!-- QuaggaJS CDN -->
-    <script src="https://jsdelivr.net"></script>
+    <!-- QuaggaJS 最新安定版CDN -->
+    <script src="https://cloudflare.com" integrity="sha512-bCsBoYwQMeHexqjcR2LNfSRb9wUe81wj7gHbf0mwhefpQn56rleS8Xpfd7O6zO6X8a+94F455cbe+A9S43pM3Q==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <style>
-        /* CSSスタイルは適宜調整してください */
-        body { font-family: sans-serif; text-align: center; }
-        .camera-label { background: #28a745; color: white; padding: 10px; border-radius: 5px; cursor: pointer; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: sans-serif; }
+        body { background: #f0f2f5; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 20px; }
+        .container { width: 100%; max-width: 500px; background: white; border-radius: 12px; padding: 30px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
+        h1 { font-size: 1.6rem; margin-bottom: 8px; color: #333; }
+        p { font-size: 0.9rem; color: #666; margin-bottom: 25px; line-height: 1.4; }
+        
+        /* 押しやすい巨大なカメラ起動ボタン */
+        .camera-label { display: block; background: #28a745; color: white; padding: 20px 10px; font-size: 1.3rem; font-weight: bold; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 6px rgba(40,167,69,0.3); transition: background 0.2s; margin-bottom: 15px; }
+        .camera-label:active { background: #218838; }
+        
+        /* 実際のファイルinputは見えないように隠す */
         #file-input { display: none; }
-        #result-box { margin-top: 20px; font-weight: bold; }
+        
+        #result-box { margin-top: 20px; padding: 15px; border-radius: 6px; font-weight: bold; font-size: 1.1rem; display: none; text-align: center; line-break: anywhere; }
+        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .loading { background: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
     </style>
 </head>
 <body>
+
+<div class="container">
     <h1>休憩打刻システム</h1>
-    <label for="file-input" class="camera-label">📷 カメラでスキャン</label>
+    <p>下のボタンを押して、従業員バーコードを撮影してください。<br>（写真は端末に保存されません）</p>
+    
+    <label for="file-input" class="camera-label">📷 カメラを起動してスキャン</label>
     <input type="file" id="file-input" accept="image/*" capture="environment" onchange="processAndDecode(this)">
+
     <div id="result-box"></div>
+</div>
 
 <script>
-    const GAS_API_URL = "YOUR_GAS_URL_HERE"; 
+    // 
+    const GAS_API_URL = "https://script.google.com/macros/s/AKfycbzLB0lat0ynkK-oTwuaZvvlGOXmMl_-XGwZhEP-0QeYs-m3T-l8tbFov9y0Fhhhe14qlg/exec"; 
 
-    // 画像をリサイズしてQuaggaに渡す処理
+    // スマホの高画素写真をバーコード解析に最適なサイズへ縮小してから読み込ませる関数
     function processAndDecode(input) {
         if (!input.files || !input.files[0]) return;
+        
+        showLoading("⚡ 画像を縮小・解析中...");
+        
         const file = input.files[0];
         const reader = new FileReader();
 
         reader.onload = function (e) {
             const img = new Image();
             img.onload = function () {
+                // キャンバスを作成して画像を自動縮小
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
-                // バーコード解析に適したサイズ(横幅800px)にリサイズ
+                
+                // バーコード解析の誤認が最も少ないとされる横幅800pxにリサイズ
                 const targetWidth = 800;
                 const scaleFactor = targetWidth / img.width;
                 canvas.width = targetWidth;
                 canvas.height = img.height * scaleFactor;
+                
                 ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
                 
-                // 縮小データを使用
-                const resizedDataUrl = canvas.toDataURL('image/jpeg', 0.8);
+                // 縮小したJPEGデータを生成
+                const resizedDataUrl = canvas.toDataURL('image/jpeg', 0.85);
 
+                // 縮小した画像を使ってQuaggaでバーコードを探す
                 Quagga.decodeSingle({
                     src: resizedDataUrl,
-                    decoder: { readers: ["code_128_reader", "ean_reader"] } // 必要に応じてリーダー追加
+                    decoder: {
+                        readers: ["code_128_reader", "ean_reader", "code_39_reader"] // 主な1次元バーコードに対応
+                    },
+                    locate: true
                 }, function (result) {
-                    if (result && result.codeResult) {
-                        sendPunchData(result.codeResult.code);
+                    if (result && result.codeResult && result.codeResult.code) {
+                        const code = result.codeResult.code;
+                        sendPunchData(code);
                     } else {
-                        document.getElementById('result-box').innerText = "認識できませんでした";
+                        showResult("バーコードを認識できませんでした。もう少し近づけるか、ピンボケしないよう明るい場所でもう一度撮影してください。", true);
                     }
+                    input.value = ''; // 選択されたファイルをクリア
                 });
             };
             img.src = e.target.result;
         };
         reader.readAsDataURL(file);
     }
-    // sendPunchData関数は適宜実装
+
+    // GAS APIへ送信
+    async function sendPunchData(employeeCode) {
+        showLoading(`打刻データを送信中... [コード: ${employeeCode}]`);
+        try {
+            await fetch(GAS_API_URL, {
+                method: "POST",
+                mode: "no-cors",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ employeeCode: employeeCode })
+            });
+            showResult(`打刻データを送信しました！<br>社員コード: ${employeeCode}`, false);
+        } catch (error) {
+            showResult("通信エラーが発生しました。インターネット接続を確認してください。", true);
+        }
+    }
+
+    function showLoading(msg) {
+        const box = document.getElementById('result-box');
+        box.className = "loading"; box.innerHTML = msg; box.style.display = "block";
+    }
+
+    function showResult(msg, isError) {
+        const box = document.getElementById('result-box');
+        box.className = isError ? "error" : "success"; box.innerHTML = msg; box.style.display = "block";
+    }
 </script>
 </body>
 </html>
